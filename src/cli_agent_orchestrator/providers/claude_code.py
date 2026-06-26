@@ -188,6 +188,12 @@ class ClaudeCodeProvider(BaseProvider):
             if profile.model:
                 command_parts.extend(["--model", profile.model])
 
+            # Per-agent reasoning effort via Claude Code's native --effort flag.
+            # Profile-scoped, so e.g. a reviewer can run at "high" while the
+            # supervisor stays at the default/global effort.
+            if profile.effort:
+                command_parts.extend(["--effort", profile.effort])
+
             # Add system prompt - escape newlines to prevent tmux chunking issues
             system_prompt = profile.system_prompt if profile.system_prompt is not None else ""
             system_prompt = self._apply_skill_prompt(system_prompt)
