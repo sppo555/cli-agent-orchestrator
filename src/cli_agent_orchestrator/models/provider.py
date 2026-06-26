@@ -10,6 +10,7 @@ class ProviderType(str, Enum):
     CODEX = "codex"
     KIMI_CLI = "kimi_cli"
     GEMINI_CLI = "gemini_cli"
+    ANTIGRAVITY_CLI = "antigravity_cli"
     COPILOT_CLI = "copilot_cli"
     OPENCODE_CLI = "opencode_cli"
     HERMES = "hermes"

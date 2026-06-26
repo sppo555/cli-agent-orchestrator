@@ -63,6 +63,25 @@ TOOL_MAPPING: Dict[str, Dict[str, List[str]]] = {
         ],
         "web_fetch": ["web_fetch", "google_web_search"],
     },
+    # Antigravity CLI (agy) — Gemini CLI's successor; reuses the same native
+    # tool vocabulary. Restriction isn't enforced in MVP (agy runs with
+    # --dangerously-skip-permissions), but the entry keeps get_disallowed_tools
+    # from KeyError'ing for this provider.
+    "antigravity_cli": {
+        "execute_bash": ["run_shell_command"],
+        "fs_read": ["read_file", "list_directory", "search_file_content", "glob"],
+        "fs_write": ["write_file", "replace"],
+        "fs_list": ["list_directory", "glob", "search_file_content"],
+        "fs_*": [
+            "read_file",
+            "write_file",
+            "replace",
+            "list_directory",
+            "search_file_content",
+            "glob",
+        ],
+        "web_fetch": ["web_fetch", "google_web_search"],
+    },
 }
 
 # Complete set of all native tools per provider (used to compute disallowed set).
