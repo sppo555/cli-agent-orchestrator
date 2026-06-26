@@ -104,6 +104,26 @@ class AntigravityCliProvider(BaseProvider):
                 workspace.mkdir(parents=True, exist_ok=True)
                 (workspace / "GEMINI.md").write_text(system_prompt, encoding="utf-8")
                 self._workspace = workspace
+
+                # Automatically trust this dynamic workspace path in settings.json
+                # to bypass agy's per-workspace trust prompt (agy only matches
+                # exact paths, and each terminal gets a fresh random workspace).
+                try:
+                    import json
+
+                    settings_path = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+                    if settings_path.exists():
+                        settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+                        settings_data.setdefault("trustedWorkspaces", [])
+                        ws_path_str = str(workspace)
+                        if ws_path_str not in settings_data["trustedWorkspaces"]:
+                            settings_data["trustedWorkspaces"].append(ws_path_str)
+                            settings_path.write_text(
+                                json.dumps(settings_data, indent=2), encoding="utf-8"
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to auto-trust workspace: {e}")
+
                 role_name = profile.name or "agent"
                 command_parts.extend(
                     [
@@ -258,5 +278,24 @@ class AntigravityCliProvider(BaseProvider):
                 import shutil
 
                 shutil.rmtree(self._workspace, ignore_errors=True)
+            except Exception:
+                pass
+
+            # Remove the auto-trusted path from settings.json to prevent bloat.
+            try:
+                import json
+
+                settings_path = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+                if settings_path.exists():
+                    settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+                    ws_path_str = str(self._workspace)
+                    if (
+                        "trustedWorkspaces" in settings_data
+                        and ws_path_str in settings_data["trustedWorkspaces"]
+                    ):
+                        settings_data["trustedWorkspaces"].remove(ws_path_str)
+                        settings_path.write_text(
+                            json.dumps(settings_data, indent=2), encoding="utf-8"
+                        )
             except Exception:
                 pass
