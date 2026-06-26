@@ -138,7 +138,9 @@ class StatusMonitor:
 
         self._schedule_screen_detection(terminal_id, provider)
 
-    def _apply_detection(self, terminal_id: str, detected: TerminalStatus) -> None:
+    def _apply_detection(
+        self, terminal_id: str, detected: TerminalStatus, force: bool = False
+    ) -> None:
         """Apply the sticky-latch rules to a freshly detected status and publish
         on change. Shared by the raw and pyte detection paths.
 
@@ -176,7 +178,7 @@ class StatusMonitor:
             if detected == TerminalStatus.UNKNOWN and last is not None:
                 return
 
-            armed = self._allow_processing_revert.get(terminal_id, False)
+            armed = self._allow_processing_revert.get(terminal_id, False) or force
             if not armed:
                 if last in _STICKY_READY_STATUSES and detected in (
                     TerminalStatus.PROCESSING,
@@ -405,6 +407,25 @@ class StatusMonitor:
             self._bursting.pop(terminal_id, None)
             handle = self._quiesce_handle.pop(terminal_id, None)
         self._cancel_quiesce_handle(handle)
+
+    def detect_and_apply(self, terminal_id: str, force: bool = False) -> None:
+        """Force immediate status detection and apply it to the cached status."""
+        provider = provider_manager.get_provider(terminal_id)
+        if provider is None:
+            return
+
+        use_screen = (
+            CAO_PYTE_STATUS
+            and getattr(provider, "supports_screen_detection", False)
+        )
+        if use_screen:
+            status = self._detect_screen(terminal_id, provider)
+        else:
+            with self._lock:
+                buffer = self._buffers.get(terminal_id, "")
+            status = self._detect_status(terminal_id, buffer)
+
+        self._apply_detection(terminal_id, status, force=force)
 
     def get_status(self, terminal_id: str) -> TerminalStatus:
         """Get current terminal status — the single source of truth for both backends.

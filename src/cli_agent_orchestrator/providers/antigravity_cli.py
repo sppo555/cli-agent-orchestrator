@@ -178,6 +178,11 @@ class AntigravityCliProvider(BaseProvider):
             raise TimeoutError(f"Antigravity CLI init timed out (last status: {status})")
 
         self._initialized = True
+        # Force StatusMonitor to run an immediate status detection check to transition
+        # from COMPLETED back to IDLE (since self._initialized is now True, get_status
+        # will evaluate the post-init state as IDLE). This prevents the next task wait
+        # from resolving immediately on a cached COMPLETED status.
+        status_monitor.detect_and_apply(self.terminal_id, force=True)
         return True
 
     def mark_input_received(self) -> None:
@@ -196,17 +201,25 @@ class AntigravityCliProvider(BaseProvider):
             return TerminalStatus.PROCESSING
 
         if AGY_IDLE_FOOTER.search(bottom):
-            has_query = any(AGY_QUERY_LINE.search(ln) for ln in rows)
-            # Body content between the query and the input box ⇒ a response.
-            has_response = any(
-                ln.strip()
-                and not AGY_QUERY_LINE.search(ln)
-                and not AGY_PROMPT_LINE.search(ln)
-                and not re.search(r"─{8,}", ln)
-                and not AGY_IDLE_FOOTER.search(ln)
-                and "for shortcuts" not in ln
-                for ln in rows[1:]
-            )
+            last_query_idx = None
+            for i, ln in enumerate(rows):
+                if AGY_QUERY_LINE.search(ln):
+                    last_query_idx = i
+
+            has_query = last_query_idx is not None
+            has_response = False
+            if has_query:
+                # Search for response lines ONLY below the last query line
+                has_response = any(
+                    ln.strip()
+                    and not AGY_QUERY_LINE.search(ln)
+                    and not AGY_PROMPT_LINE.search(ln)
+                    and not re.search(r"─{8,}", ln)
+                    and not AGY_IDLE_FOOTER.search(ln)
+                    and "for shortcuts" not in ln
+                    for ln in rows[last_query_idx + 1:]
+                )
+
             if has_query and has_response:
                 # Post-init -i response is not a task completion — keep IDLE so
                 # handoff (waits for IDLE) can send the real task.
