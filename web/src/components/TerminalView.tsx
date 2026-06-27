@@ -82,10 +82,20 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       const text = e.clipboardData?.getData('text/plain')
       if (text) {
         e.preventDefault()
+        e.stopPropagation()
         sendTextInput(text)
       }
     }
-    el.addEventListener('paste', handlePaste)
+
+    const handleClipboardKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase()
+      if (e.ctrlKey && !e.altKey && key === 'v') {
+        e.stopImmediatePropagation()
+      }
+    }
+
+    el.addEventListener('paste', handlePaste, true)
+    el.addEventListener('keydown', handleClipboardKeyDown, true)
 
     // Browser clipboard shortcuts. Without this, some agent TUIs receive Ctrl+V
     // as an application shortcut (for example image paste) instead of text paste.
@@ -102,11 +112,7 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       }
 
       if (e.ctrlKey && !e.altKey && key === 'v') {
-        if (navigator.clipboard?.readText) {
-          navigator.clipboard.readText().then(sendTextInput).catch(() => {})
-          return false
-        }
-        return true
+        return false
       }
 
       return true
@@ -143,7 +149,8 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       cancelAnimationFrame(initialFit)
       clearTimeout(resizeTimer)
       resizeObserver.disconnect()
-      el.removeEventListener('paste', handlePaste)
+      el.removeEventListener('paste', handlePaste, true)
+      el.removeEventListener('keydown', handleClipboardKeyDown, true)
       ws.close()
       term.dispose()
     }
