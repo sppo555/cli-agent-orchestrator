@@ -72,18 +72,47 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       }
     })
 
-    // Ctrl+Shift+C to copy selection
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'C') {
-        const selection = term.getSelection()
-        if (selection) navigator.clipboard.writeText(selection).catch(() => {})
-        return false
+    const sendTextInput = (text: string) => {
+      if (text && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data: text }))
       }
+    }
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text/plain')
+      if (text) {
+        e.preventDefault()
+        sendTextInput(text)
+      }
+    }
+    el.addEventListener('paste', handlePaste)
+
+    // Browser clipboard shortcuts. Without this, some agent TUIs receive Ctrl+V
+    // as an application shortcut (for example image paste) instead of text paste.
+    term.attachCustomKeyEventHandler((e) => {
+      const key = e.key.toLowerCase()
+
+      if (e.ctrlKey && !e.altKey && key === 'c') {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard?.writeText(selection).catch(() => {})
+          return false
+        }
+        return !e.shiftKey
+      }
+
+      if (e.ctrlKey && !e.altKey && key === 'v') {
+        if (navigator.clipboard?.readText) {
+          navigator.clipboard.readText().then(sendTextInput).catch(() => {})
+          return false
+        }
+        return true
+      }
+
       return true
     })
 
-    // onData handles ALL input including paste — xterm.js
-    // receives pasted text through the browser's input system
+    // onData handles normal input and xterm.js paste paths.
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input', data }))
@@ -114,6 +143,7 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       cancelAnimationFrame(initialFit)
       clearTimeout(resizeTimer)
       resizeObserver.disconnect()
+      el.removeEventListener('paste', handlePaste)
       ws.close()
       term.dispose()
     }
