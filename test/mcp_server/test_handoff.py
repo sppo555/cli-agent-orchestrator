@@ -215,6 +215,24 @@ class TestHandoffOutcomes:
         # The single combined call requests server-side teardown.
         assert mock_requests.post.call_args[1]["json"]["teardown"] is True
 
+    @patch("cli_agent_orchestrator.mcp_server.server._get_cleanup_nudge", return_value="")
+    @patch("cli_agent_orchestrator.mcp_server.server._resolve_handoff_provider")
+    def test_antigravity_handoff_keeps_terminal_for_inspection(self, mock_provider, _nudge):
+        """agy handoff keeps the terminal because its TUI can briefly look ready
+        before the requested artifact has actually been written."""
+        mock_provider.return_value = _ctx("antigravity_cli")
+
+        with patch("cli_agent_orchestrator.mcp_server.server.requests") as mock_requests:
+            mock_requests.post.return_value = _ok_run_step_response(
+                terminal_id="agy-t1", last_message="premature ready frame"
+            )
+            mock_requests.Timeout = Exception
+            result = asyncio.run(_handoff_impl("developer", "Do task"))
+
+        assert result.success is True
+        assert result.terminal_id == "agy-t1"
+        assert mock_requests.post.call_args[1]["json"]["teardown"] is False
+
     @patch("cli_agent_orchestrator.mcp_server.server._resolve_handoff_provider")
     def test_endpoint_504_maps_to_timeout_result(self, mock_provider):
         """A 504 (worker ran long) becomes a timeout failure and reads the live

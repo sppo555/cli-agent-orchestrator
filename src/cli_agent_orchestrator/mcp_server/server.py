@@ -689,7 +689,11 @@ async def _handoff_impl(
             "provider": provider,
             "agent": agent_profile,
             "prompt": shaped_message,
-            "teardown": True,
+            # agy can briefly render a ready footer while work is still in
+            # progress, which may make run-step report COMPLETED early. Keep
+            # the terminal around so supervisors can inspect/reuse it instead
+            # of losing the worker window on a premature handoff success.
+            "teardown": provider != "antigravity_cli",
             "timeout": float(timeout),
         }
         if ctx.session_name:
