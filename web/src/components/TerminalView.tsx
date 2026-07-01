@@ -117,7 +117,9 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
 
       if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
         e.preventDefault()
-        term.scrollPages(e.key === 'PageUp' ? -1 : 1)
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'scroll', direction: e.key === 'PageUp' ? 'up' : 'down' }))
+        }
         return false
       }
 

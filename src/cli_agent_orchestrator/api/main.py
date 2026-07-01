@@ -434,6 +434,26 @@ def _build_pty_env() -> Dict[str, str]:
     return env
 
 
+def _scroll_tmux_viewer(viewer_session: str, window_name: str, direction: str) -> None:
+    """Scroll an isolated tmux viewer without sending PageUp/PageDown to the pane."""
+    target = f"{viewer_session}:{window_name}"
+    try:
+        if direction == "up":
+            subprocess.run(
+                ["tmux", "copy-mode", "-u", "-t", target],
+                check=False,
+                capture_output=True,
+            )
+        elif direction == "down":
+            subprocess.run(
+                ["tmux", "send-keys", "-t", target, "-X", "page-down"],
+                check=False,
+                capture_output=True,
+            )
+    except OSError:
+        pass
+
+
 app = FastAPI(
     title="CLI Agent Orchestrator",
     description="Simplified CLI Agent Orchestrator API",
@@ -1641,6 +1661,13 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                         os.kill(proc.pid, signal.SIGWINCH)
                     except OSError:
                         pass
+                elif payload.get("type") == "scroll":
+                    await asyncio.to_thread(
+                        _scroll_tmux_viewer,
+                        viewer_session,
+                        window_name,
+                        payload.get("direction", ""),
+                    )
         except WebSocketDisconnect:
             pass
         except (Exception, asyncio.CancelledError):

@@ -679,6 +679,42 @@ class TestWebSocketGroupedViewerSession:
         assert f"cao-s:w" not in attach_cmd
 
 
+class TestWebSocketViewerScroll:
+    """Regression guard for Web terminal PageUp/PageDown behavior."""
+
+    def test_scroll_up_enters_tmux_copy_mode(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "up")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "copy-mode", "-u", "-t", "caoview_123:reviewer"],
+            check=False,
+            capture_output=True,
+        )
+
+    def test_scroll_down_pages_tmux_copy_mode_down(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "down")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "caoview_123:reviewer", "-X", "page-down"],
+            check=False,
+            capture_output=True,
+        )
+
+    def test_unknown_scroll_direction_is_ignored(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "sideways")
+
+        mock_run.assert_not_called()
+
+
 class _StopHere(Exception):
     """Sentinel raised by the wiring test once Popen args are captured."""
 
