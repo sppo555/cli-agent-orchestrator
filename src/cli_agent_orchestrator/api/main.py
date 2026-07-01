@@ -454,6 +454,18 @@ def _scroll_tmux_viewer(viewer_session: str, window_name: str, direction: str) -
         pass
 
 
+def _cancel_tmux_viewer_copy_mode(viewer_session: str, window_name: str) -> None:
+    """Leave tmux copy-mode before forwarding normal input to the pane."""
+    try:
+        subprocess.run(
+            ["tmux", "send-keys", "-t", f"{viewer_session}:{window_name}", "-X", "cancel"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        pass
+
+
 app = FastAPI(
     title="CLI Agent Orchestrator",
     description="Simplified CLI Agent Orchestrator API",
@@ -1642,6 +1654,11 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                 msg = await websocket.receive_text()
                 payload = json.loads(msg)
                 if payload.get("type") == "input":
+                    await asyncio.to_thread(
+                        _cancel_tmux_viewer_copy_mode,
+                        viewer_session,
+                        window_name,
+                    )
                     raw = payload["data"].encode()
                     # Write in chunks to avoid overflowing the PTY buffer
                     chunk_size = 1024

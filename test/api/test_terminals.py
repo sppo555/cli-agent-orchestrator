@@ -714,6 +714,18 @@ class TestWebSocketViewerScroll:
 
         mock_run.assert_not_called()
 
+    def test_cancel_copy_mode_before_normal_input(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._cancel_tmux_viewer_copy_mode("caoview_123", "reviewer")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "caoview_123:reviewer", "-X", "cancel"],
+            check=False,
+            capture_output=True,
+        )
+
 
 class _StopHere(Exception):
     """Sentinel raised by the wiring test once Popen args are captured."""
