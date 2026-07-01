@@ -11,6 +11,7 @@ import signal
 import struct
 import subprocess
 import termios
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -1515,6 +1516,39 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         await websocket.close(code=4003, reason="Invalid tmux target name")
         return
 
+    # Attaching directly to the shared CAO session would change that session's
+    # current window for *every* attached client (other browser viewers and a
+    # local ``tmux attach`` in a real terminal), because a tmux session has a
+    # single active window shared by all its clients. Selecting window B in one
+    # viewer would yank everyone else to window B.
+    #
+    # Instead, give each WebSocket its own grouped session. A grouped session
+    # (``new-session -t <target>``) shares the same windows/panes as the target
+    # session group — input still reaches the real agent pane — but it keeps an
+    # independent current window. Switching windows in one viewer therefore no
+    # longer disturbs the original session or any other viewer.
+    viewer_session = f"caoview_{uuid.uuid4().hex[:12]}"
+    try:
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-t", session_name, "-s", viewer_session],
+            check=True,
+            capture_output=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        await websocket.close(code=4011, reason="Failed to create terminal viewer session")
+        return
+
+    def _kill_viewer_session() -> None:
+        """Best-effort teardown of the per-connection grouped viewer session."""
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", viewer_session],
+                check=False,
+                capture_output=True,
+            )
+        except OSError:
+            pass
+
     # Create PTY pair for tmux attach
     master_fd, slave_fd = pty.openpty()
 
@@ -1530,7 +1564,7 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
     # Any explicit non-dumb TERM the operator set is preserved.
     pty_env = _build_pty_env()
     proc = subprocess.Popen(
-        ["tmux", "-u", "attach-session", "-t", f"{session_name}:{window_name}"],
+        ["tmux", "-u", "attach-session", "-t", f"{viewer_session}:{window_name}"],
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
@@ -1635,6 +1669,10 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         except asyncio.TimeoutError:
             proc.kill()
             await asyncio.to_thread(proc.wait)
+        # Tear down the per-connection grouped viewer session. Killing a
+        # grouped session only removes this viewer; the original CAO session
+        # and its windows/panes survive because they belong to the group.
+        await asyncio.to_thread(_kill_viewer_session)
 
 
 # ── Flow management endpoints ────────────────────────────────────────
