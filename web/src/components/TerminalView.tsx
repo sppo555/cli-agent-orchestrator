@@ -115,6 +115,12 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
         return false
       }
 
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault()
+        term.scrollPages(e.key === 'PageUp' ? -1 : 1)
+        return false
+      }
+
       return true
     })
 
