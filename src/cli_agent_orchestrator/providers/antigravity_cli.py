@@ -186,6 +186,10 @@ class AntigravityCliProvider(BaseProvider):
         # MCP server names registered into ~/.gemini/config/mcp_config.json,
         # removed on cleanup().
         self._mcp_server_names: list[str] = []
+        # Workspace path added to agy's trustedWorkspaces by this provider.
+        # Only paths this instance adds are removed during cleanup; pre-existing
+        # user-trusted workspaces are left intact.
+        self._trusted_workspace: Optional[str] = None
         # Turn counter. get_status() returns IDLE while _turns == 0 (fresh
         # spawn / post-init, no task delivered yet) and COMPLETED once at least
         # one turn has been delivered and the agent is back to a ready footer.
@@ -215,6 +219,72 @@ class AntigravityCliProvider(BaseProvider):
     def _mcp_config_path(self) -> Path:
         """Path to agy's MCP config file (shared ~/.gemini/config/mcp_config.json)."""
         return Path.home() / ".gemini" / "config" / "mcp_config.json"
+
+    def _settings_path(self) -> Path:
+        """Path to agy's settings file containing trustedWorkspaces."""
+        return Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+
+    def _trust_workspace(self, workspace: Optional[str]) -> None:
+        """Add the pane workspace to agy's trustedWorkspaces, best effort."""
+        if not workspace:
+            return
+
+        try:
+            workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
+            path = self._settings_path()
+            if path.exists() and path.stat().st_size > 0:
+                with open(path) as f:
+                    config = json.load(f)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                config = {}
+
+            if not isinstance(config, dict):
+                logger.warning(
+                    "Antigravity settings root in %s is %s, not an object; resetting",
+                    path,
+                    type(config).__name__,
+                )
+                config = {}
+
+            trusted = config.setdefault("trustedWorkspaces", [])
+            if not isinstance(trusted, list):
+                logger.warning(
+                    "'trustedWorkspaces' in %s is %s, not a list; replacing",
+                    path,
+                    type(trusted).__name__,
+                )
+                trusted = []
+                config["trustedWorkspaces"] = trusted
+
+            if workspace_path not in trusted:
+                trusted.append(workspace_path)
+                with open(path, "w") as f:
+                    json.dump(config, f, indent=2)
+                self._trusted_workspace = workspace_path
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to trust Antigravity workspace %r: %s", workspace, exc)
+
+    def _untrust_workspace(self) -> None:
+        """Remove the workspace this provider added to agy's trustedWorkspaces."""
+        if not self._trusted_workspace:
+            return
+
+        path = self._settings_path()
+        try:
+            if not path.exists():
+                return
+            with open(path) as f:
+                config = json.load(f)
+            trusted = config.get("trustedWorkspaces") if isinstance(config, dict) else None
+            if isinstance(trusted, list) and self._trusted_workspace in trusted:
+                trusted.remove(self._trusted_workspace)
+                with open(path, "w") as f:
+                    json.dump(config, f, indent=2)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to untrust Antigravity workspace from %s: %s", path, exc)
+        finally:
+            self._trusted_workspace = None
 
     def _build_agy_command(self) -> str:
         """Build the ``agy`` launch command.
@@ -414,6 +484,13 @@ class AntigravityCliProvider(BaseProvider):
         # PROCESSING transition past any stale ready latch. Imported lazily to
         # avoid a circular import (status_monitor imports provider_manager).
         from cli_agent_orchestrator.services.status_monitor import status_monitor
+
+        try:
+            self._trust_workspace(
+                get_backend().get_pane_working_directory(self.session_name, self.window_name)
+            )
+        except Exception as exc:
+            logger.warning("Failed to resolve Antigravity workspace for trust: %s", exc)
 
         status_monitor.notify_input_sent(self.terminal_id)
         get_backend().send_keys(self.session_name, self.window_name, command)
@@ -651,6 +728,7 @@ class AntigravityCliProvider(BaseProvider):
     def cleanup(self) -> None:
         """Remove the MCP servers this provider registered and reset state."""
         self._unregister_mcp_servers()
+        self._untrust_workspace()
         self._initialized = False
 
     def mark_input_received(self) -> None:
