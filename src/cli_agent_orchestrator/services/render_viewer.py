@@ -13,11 +13,14 @@ seconds of a viewer attaching.
 
 Fix: for the duration of init, attach a short-lived HEADLESS PTY client to the
 worker window — the same grouped-viewer-session mechanism the Web terminal uses
-(see ``api/main.py``), sized to match the pane so it does not reflow. That keeps
-the pane rendering so the shell prompt, CLI launch banner and idle box all flow
-through ``pipe-pane`` to the StatusMonitor. The viewer is detached as soon as
-init returns; during an active task the CLI emits output continuously, so no
-viewer is needed to keep status flowing after init.
+(see ``api/main.py``), sized to match the pane so it does not reflow — AND
+periodically toggle its size by one row to fire a SIGWINCH re-render. A passive
+attach alone is not enough: the CLI paints its idle frame once (buried in the
+launch burst) then goes quiet, and the StatusMonitor can miss it; the periodic
+SIGWINCH makes the CLI repaint its current frame, so once it settles to idle a
+clean idle box flows through ``pipe-pane`` and the status flips. The viewer is
+detached as soon as init returns; during an active task the CLI emits output
+continuously, so no viewer is needed to keep status flowing after init.
 
 Only relevant to the pipe-pane (tmux) backend; the herdr backend delivers status
 via its own socket events and is never routed here.
@@ -56,8 +59,11 @@ class _RenderViewer:
         self._viewer_session = f"caoinit_{uuid.uuid4().hex[:12]}"
         self._proc: subprocess.Popen | None = None
         self._master_fd = -1
+        self._cols = _DEFAULT_COLS
+        self._rows = _DEFAULT_ROWS
         self._stop = threading.Event()
         self._drain: threading.Thread | None = None
+        self._nudge: threading.Thread | None = None
 
     def _pane_size(self) -> Tuple[int, int]:
         try:
@@ -82,6 +88,7 @@ class _RenderViewer:
         """Attach the headless viewer. Best-effort: returns False on any failure."""
         try:
             cols, rows = self._pane_size()
+            self._cols, self._rows = cols, rows
             subprocess.run(
                 ["tmux", "new-session", "-d", "-t", self._session, "-s", self._viewer_session],
                 check=True,
@@ -109,8 +116,26 @@ class _RenderViewer:
             )
             os.close(slave_fd)
             self._master_fd = master_fd
+            # Pin the window size so the periodic resize nudge takes effect
+            # deterministically instead of being overridden by whatever client
+            # is "latest" (the supervisor's own attach, other viewers). Restored
+            # in stop(). Only affects this worker's own window.
+            subprocess.run(
+                [
+                    "tmux",
+                    "set-window-option",
+                    "-t",
+                    f"{self._session}:{self._window}",
+                    "window-size",
+                    "manual",
+                ],
+                check=False,
+                capture_output=True,
+            )
             self._drain = threading.Thread(target=self._drain_loop, daemon=True)
             self._drain.start()
+            self._nudge = threading.Thread(target=self._nudge_loop, daemon=True)
+            self._nudge.start()
             logger.debug(
                 "render-viewer %s attached to %s:%s (%dx%d)",
                 self._viewer_session,
@@ -127,6 +152,44 @@ class _RenderViewer:
             self.stop()
             return False
 
+    def _nudge_loop(self) -> None:
+        """Periodically resize the window to force a SIGWINCH re-render.
+
+        Attaching a client alone is NOT enough: the CLI paints its idle frame
+        once, mixed into the noisy launch output, and then goes quiet — the
+        StatusMonitor's chunked read of that burst can miss the idle box and,
+        with no further output, never re-evaluates (observed live: viewer
+        attached, pane at the idle box, status stuck UNKNOWN for 80s+). A size
+        change delivers SIGWINCH to the CLI, which repaints its CURRENT frame
+        cleanly; once it has settled to idle that repaint is an unambiguous idle
+        box that flows through pipe-pane and flips the status within one tick.
+        The window is pinned to ``window-size manual`` (see start) so the resize
+        takes effect regardless of which client is attached; toggling the row
+        count by one nets no lasting change but fires SIGWINCH each cycle. Cheap
+        and only runs for the (short) duration of init.
+        """
+        toggled = False
+        while not self._stop.wait(2.5):
+            rows = self._rows - 1 if toggled else self._rows
+            try:
+                subprocess.run(
+                    [
+                        "tmux",
+                        "resize-window",
+                        "-t",
+                        f"{self._session}:{self._window}",
+                        "-x",
+                        str(self._cols),
+                        "-y",
+                        str(rows),
+                    ],
+                    check=False,
+                    capture_output=True,
+                )
+                toggled = not toggled
+            except OSError:
+                break
+
     def _drain_loop(self) -> None:
         """Discard the attached client's screen output so its PTY never blocks."""
         while not self._stop.is_set() and self._master_fd >= 0:
@@ -140,6 +203,23 @@ class _RenderViewer:
     def stop(self) -> None:
         """Detach the viewer and tear down its grouped session (best-effort)."""
         self._stop.set()
+        # Un-pin the window size so attached clients (supervisor, Web viewers)
+        # drive it again once init is done.
+        try:
+            subprocess.run(
+                [
+                    "tmux",
+                    "set-window-option",
+                    "-u",
+                    "-t",
+                    f"{self._session}:{self._window}",
+                    "window-size",
+                ],
+                check=False,
+                capture_output=True,
+            )
+        except OSError:
+            pass
         if self._proc is not None:
             try:
                 os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
