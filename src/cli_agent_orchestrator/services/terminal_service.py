@@ -47,6 +47,7 @@ from cli_agent_orchestrator.services.fifo_reader import fifo_manager
 from cli_agent_orchestrator.services.herdr_inbox_registry import get_herdr_inbox_service
 from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
+from cli_agent_orchestrator.services.render_viewer import render_during_init
 from cli_agent_orchestrator.services.session_env import (
     clear_session_env,
     get_session_env,
@@ -306,7 +307,17 @@ async def create_terminal(
             skill_prompt=skill_prompt,
             model=profile.model if profile else None,
         )
-        await provider_instance.initialize()
+        # An unattended tmux window does not flush its TUI redraws through
+        # pipe-pane, so the StatusMonitor never sees the CLI's idle frame and
+        # initialize() (wait_for_shell / wait_until_status) times out unless a
+        # human opens the Web terminal. Hold a headless render-viewer on the
+        # pane for the duration of init so the idle box flows to the buffer.
+        # pipe-pane backends only; herdr delivers status via socket events.
+        if get_backend().supports_event_inbox():
+            await provider_instance.initialize()
+        else:
+            with render_during_init(session_name, window_name):
+                await provider_instance.initialize()
 
         # Persist shell_command baseline if the provider captured one
         shell_command = provider_instance.shell_baseline
