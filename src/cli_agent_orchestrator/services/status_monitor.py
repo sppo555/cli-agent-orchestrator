@@ -484,13 +484,15 @@ class StatusMonitor:
             armed_at = self._input_sent_at.get(terminal_id)
             armed_len = self._input_sent_buffer_len.get(terminal_id, 0)
             current_len = len(self._buffers.get(terminal_id, ""))
-            # When cached status is PROCESSING, the debounced detection may be
-            # stuck: TUI providers (kiro-cli) can send escape sequences
-            # continuously after becoming idle, preventing the 200ms quiescence
-            # timer from ever firing. Do a fresh detection from the current
-            # buffer so poll-based callers (wait_until_status) catch the
-            # PROCESSING→ready transition without waiting for stream silence.
-            if cached == TerminalStatus.PROCESSING:
+            # When cached status is PROCESSING or UNKNOWN, the debounced
+            # detection may be stuck: TUI providers can send escape sequences
+            # continuously after becoming idle, preventing the quiescence timer
+            # from ever firing; or the push pipeline can publish the initial
+            # UNKNOWN and then miss the ready edge during init. Do a fresh
+            # detection from the current buffer so poll-based callers
+            # (wait_until_status) catch PROCESSING→ready and UNKNOWN→ready
+            # transitions without waiting for another status event.
+            if cached in (TerminalStatus.PROCESSING, TerminalStatus.UNKNOWN):
                 buffer = self._buffers.get(terminal_id, "")
             else:
                 buffer = ""
@@ -523,13 +525,13 @@ class StatusMonitor:
                 return fresh
             return TerminalStatus.PROCESSING
 
-        if cached == TerminalStatus.PROCESSING and buffer:
+        if cached in (TerminalStatus.PROCESSING, TerminalStatus.UNKNOWN) and buffer:
             fresh = self._detect_current_status(terminal_id, buffer)
             logger.debug(
-                f"get_status [{terminal_id}]: cached=PROCESSING, "
+                f"get_status [{terminal_id}]: cached={cached.value}, "
                 f"fresh={fresh.value}, buffer_len={len(buffer)}"
             )
-            if fresh != TerminalStatus.PROCESSING and fresh != TerminalStatus.UNKNOWN:
+            if fresh != cached and fresh != TerminalStatus.UNKNOWN:
                 self._apply_detection(terminal_id, fresh)
                 return fresh
         return cached
@@ -545,7 +547,17 @@ class StatusMonitor:
         if provider is None:
             return TerminalStatus.UNKNOWN
         if CAO_PYTE_STATUS and getattr(provider, "supports_screen_detection", False):
-            return self._detect_screen(terminal_id, provider)
+            screen_status = self._detect_screen(terminal_id, provider)
+            if screen_status != TerminalStatus.UNKNOWN:
+                return screen_status
+            # A settled init frame can be present in the rolling pipe-pane
+            # buffer while pyte's composited viewport still lacks the prompt
+            # structure we need. UNKNOWN is "no signal", so let raw detection
+            # provide a secondary signal for polling callers instead of
+            # stranding wait_until_status at UNKNOWN.
+            if buffer:
+                return self._detect_status(terminal_id, buffer)
+            return TerminalStatus.UNKNOWN
         return self._detect_status(terminal_id, buffer)
 
     def get_buffer(self, terminal_id: str) -> str:
