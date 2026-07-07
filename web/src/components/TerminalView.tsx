@@ -68,7 +68,7 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
     term.onSelectionChange(() => {
       const selection = term.getSelection()
       if (selection) {
-        navigator.clipboard.writeText(selection).catch(() => {})
+        navigator.clipboard?.writeText(selection).catch(() => {})
       }
     })
 
@@ -106,6 +106,7 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
         const selection = term.getSelection()
         if (selection) {
           navigator.clipboard?.writeText(selection).catch(() => {})
+          term.clearSelection()
           return false
         }
         return !e.shiftKey
