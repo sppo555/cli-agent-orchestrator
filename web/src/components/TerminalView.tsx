@@ -64,11 +64,38 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       term.write('\r\n\x1b[33m[Connection closed]\x1b[0m\r\n')
     }
 
+    // navigator.clipboard requires a secure context (HTTPS or localhost).
+    // Tailscale/LAN access over plain HTTP has no navigator.clipboard, so fall
+    // back to the legacy execCommand('copy'), which works in insecure contexts.
+    const copyToClipboard = (text: string) => {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => copyViaExecCommand(text))
+      } else {
+        copyViaExecCommand(text)
+      }
+    }
+
+    const copyViaExecCommand = (text: string) => {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+      try {
+        document.execCommand('copy')
+      } catch {
+        // no-op: nothing more we can do in this browser/context
+      }
+      document.body.removeChild(textarea)
+    }
+
     // Copy selection to clipboard on mouse-up
     term.onSelectionChange(() => {
       const selection = term.getSelection()
       if (selection) {
-        navigator.clipboard?.writeText(selection).catch(() => {})
+        copyToClipboard(selection)
       }
     })
 
@@ -105,7 +132,7 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       if (e.ctrlKey && !e.altKey && key === 'c') {
         const selection = term.getSelection()
         if (selection) {
-          navigator.clipboard?.writeText(selection).catch(() => {})
+          copyToClipboard(selection)
           term.clearSelection()
           return false
         }
