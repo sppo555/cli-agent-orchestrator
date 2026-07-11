@@ -695,6 +695,7 @@ class TestWebSocketGroupedViewerSession:
         viewer_session = new_cmd[new_cmd.index("-s") + 1]
         assert viewer_session != "cao-s"
         assert viewer_session.startswith("caoview_")
+        assert ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"] in run_calls
 
         # The attach must target the isolated viewer session, NOT the shared one.
         attach_cmd = captured["args"][0]  # type: ignore[index]
