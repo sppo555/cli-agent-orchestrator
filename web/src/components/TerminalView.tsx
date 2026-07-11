@@ -76,26 +76,42 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
     }
 
     const copyViaExecCommand = (text: string) => {
+      // Preserve the currently focused element (xterm's helper textarea) so the
+      // terminal keeps receiving keystrokes after the copy. Without restoring
+      // focus, the next Ctrl+C never reaches xterm's key handler.
+      const previouslyFocused = document.activeElement as HTMLElement | null
       const textarea = document.createElement('textarea')
       textarea.value = text
+      textarea.setAttribute('readonly', '')
+      // Position off-screen rather than opacity:0 — some browsers refuse to copy
+      // from a fully transparent element.
       textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
+      textarea.style.left = '-9999px'
+      textarea.style.top = '0'
       document.body.appendChild(textarea)
-      textarea.focus()
       textarea.select()
+      textarea.setSelectionRange(0, text.length)
       try {
         document.execCommand('copy')
       } catch {
         // no-op: nothing more we can do in this browser/context
       }
       document.body.removeChild(textarea)
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus()
+      } else {
+        term.focus()
+      }
     }
 
-    // Copy selection to clipboard on mouse-up
+    // Auto-copy the selection on mouse-up, but only through the async Clipboard
+    // API. The execCommand fallback steals focus (it must focus a textarea), so
+    // running it on every selection change would break subsequent keystrokes;
+    // over plain HTTP the user copies explicitly with Ctrl+C instead.
     term.onSelectionChange(() => {
       const selection = term.getSelection()
-      if (selection) {
-        copyToClipboard(selection)
+      if (selection && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(selection).catch(() => {})
       }
     })
 
