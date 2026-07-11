@@ -1953,6 +1953,15 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
             check=True,
             capture_output=True,
         )
+        # ``mouse`` is a session option, so scope it to this short-lived viewer
+        # session.  Do not change the global ``root`` key table: doing so would
+        # alter wheel behavior for every unrelated tmux client on this server.
+        # PageUp/PageDown use the explicit WebSocket scroll path below instead.
+        subprocess.run(
+            ["tmux", "set-option", "-t", viewer_session, "mouse", "off"],
+            check=False,
+            capture_output=True,
+        )
     except (subprocess.CalledProcessError, OSError):
         await websocket.close(code=4011, reason="Failed to create terminal viewer session")
         return

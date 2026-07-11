@@ -696,6 +696,11 @@ class TestWebSocketGroupedViewerSession:
         assert viewer_session != "cao-s"
         assert viewer_session.startswith("caoview_")
 
+        # Wheel handling must be isolated to this viewer session. Changing the
+        # global root key table would affect unrelated local tmux clients.
+        assert ["tmux", "set-option", "-t", viewer_session, "mouse", "off"] in run_calls
+        assert not any(cmd[:4] == ["tmux", "bind-key", "-T", "root"] for cmd in run_calls)
+
         # The attach must target the isolated viewer session, NOT the shared one.
         attach_cmd = captured["args"][0]  # type: ignore[index]
         assert attach_cmd[-1] == f"{viewer_session}:w"
