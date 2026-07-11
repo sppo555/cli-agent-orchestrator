@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- add `cao profile` command group for profile lifecycle management: list/show/validate/remove/templates/create. Includes Jinja2 scaffolding engine with 7 AWS templates (stepfunction, cloudwatch-logs, dynamodb-query, dynamodb-delete, sqs-monitor, sqs-send, sqs-dlq-check) and JSON-Schema validation for both profiles and template configs (#340)
+
 - Enable/disable an agent-profile directory without removing it, so its profiles leave the active set while the path stays listed (#280, #281).
 
 - add optional `skills` field to `AgentProfile` to scope the per-agent skill catalog via an fnmatch allowlist; runtime-prompt providers only, `load_skill` resolution unchanged (#351)
@@ -49,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - status monitor: `_arm_quiesce_timer` now cancels any outstanding quiescence timer for a terminal before arming the new one. Several output chunks arriving in quick succession queued multiple `_arm` closures; the later one overwrote the stored `TimerHandle` while leaving the earlier timer live, so two timers fired and a stale one firing mid-burst caused early/duplicate quiescence detections and status flaps. One outstanding timer per terminal now, always the latest
 - terminal_service: deferred-init failure path logs with `exc_info=True` (preserving the traceback) and formats the exception with `{e!r}` in both the log line and the supervisor-facing inbox message, so provider-supplied error text can't inject newlines/control characters
 - api: `POST /sessions/{name}/terminals` now rejects an `initial_message` / `initial_message_orchestration_type` body with 400 when `defer_init=false` — that payload is only delivered on the deferred-init path, so silently dropping it previously surfaced as a hard-to-diagnose "worker never received task". Deliberate 4xx responses (this guard and the invalid-orchestration-type check) also propagate as-is instead of being masked as 500
+
+### Security
+
+- memory: validate every user-derived path component (`key`, `scope`, `scope_id`) as a single safe path segment and confine assembled wiki/index paths under the memory base directory via `os.path.realpath` + an explicit containment guard, closing the 11 CodeQL `py/path-injection` alerts in `memory_service.py`. Added shared helpers `validate_path_component` / `safe_join_under_base` in `utils/path_validation.py`. The remaining `py/clear-text-storage-sensitive-data` alert is assessed as a false positive (the memory wiki is intentionally plaintext markdown; the flagged value is a topic `key` slug, not a credential) and documented in-code for won't-fix dismissal.
 
 ## [2.2.0] - 2026-06-04
 
