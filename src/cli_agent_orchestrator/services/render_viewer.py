@@ -116,16 +116,16 @@ class _RenderViewer:
             )
             os.close(slave_fd)
             self._master_fd = master_fd
-            # Pin the window size so the periodic resize nudge takes effect
-            # deterministically instead of being overridden by whatever client
-            # is "latest" (the supervisor's own attach, other viewers). Restored
-            # in stop(). Only affects this worker's own window.
+            # ``window-size`` is a session option. Pin it only on our short-lived
+            # grouped viewer session so the resize nudge never overwrites the
+            # real CAO session's operator-selected sizing policy. Killing this
+            # viewer session restores everything automatically.
             subprocess.run(
                 [
                     "tmux",
-                    "set-window-option",
+                    "set-option",
                     "-t",
-                    f"{self._session}:{self._window}",
+                    self._viewer_session,
                     "window-size",
                     "manual",
                 ],
@@ -163,10 +163,10 @@ class _RenderViewer:
         change delivers SIGWINCH to the CLI, which repaints its CURRENT frame
         cleanly; once it has settled to idle that repaint is an unambiguous idle
         box that flows through pipe-pane and flips the status within one tick.
-        The window is pinned to ``window-size manual`` (see start) so the resize
-        takes effect regardless of which client is attached; toggling the row
-        count by one nets no lasting change but fires SIGWINCH each cycle. Cheap
-        and only runs for the (short) duration of init.
+        The short-lived viewer session is pinned to ``window-size manual`` (see
+        start), so the resize takes effect regardless of other clients without
+        changing the real CAO session. It only runs for the short init window;
+        destroying the viewer session removes its temporary sizing policy.
         """
         toggled = False
         while not self._stop.wait(2.5):
@@ -177,7 +177,7 @@ class _RenderViewer:
                         "tmux",
                         "resize-window",
                         "-t",
-                        f"{self._session}:{self._window}",
+                        f"{self._viewer_session}:{self._window}",
                         "-x",
                         str(self._cols),
                         "-y",
@@ -203,23 +203,6 @@ class _RenderViewer:
     def stop(self) -> None:
         """Detach the viewer and tear down its grouped session (best-effort)."""
         self._stop.set()
-        # Un-pin the window size so attached clients (supervisor, Web viewers)
-        # drive it again once init is done.
-        try:
-            subprocess.run(
-                [
-                    "tmux",
-                    "set-window-option",
-                    "-u",
-                    "-t",
-                    f"{self._session}:{self._window}",
-                    "window-size",
-                ],
-                check=False,
-                capture_output=True,
-            )
-        except OSError:
-            pass
         if self._proc is not None:
             try:
                 os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
