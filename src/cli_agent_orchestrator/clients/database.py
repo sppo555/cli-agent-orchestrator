@@ -181,6 +181,7 @@ def init_db() -> None:
     _migrate_workflow_index()
     _migrate_workflow_run()
     _migrate_workflow_run_step()
+    _migrate_worker_token_usage()
 
 
 def _restrict_db_file_permissions() -> None:
@@ -471,6 +472,55 @@ def _migrate_workflow_run_step() -> None:
         logger.debug(f"workflow_run_step migration skipped: {e}")
 
 
+def _migrate_worker_token_usage() -> None:
+    """Create the durable per-worker token usage table if missing.
+
+    Usage rows intentionally contain metadata and counts only — never prompts,
+    responses, or terminal transcripts. Each completed worker attempt gets its
+    own row, so retries and workers whose terminals were deleted remain
+    inspectable.
+    """
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    try:
+        with sqlite3.connect(str(DATABASE_FILE)) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS worker_token_usage ("
+                "id TEXT PRIMARY KEY, "
+                "terminal_id TEXT NOT NULL, "
+                "provider TEXT NOT NULL, "
+                "agent TEXT NOT NULL, "
+                "run_id TEXT, "
+                "step_id TEXT, "
+                "model TEXT, "
+                "effort TEXT, "
+                "progress TEXT, "
+                "input_tokens INTEGER NOT NULL, "
+                "output_tokens INTEGER NOT NULL, "
+                "total_tokens INTEGER NOT NULL, "
+                "estimated INTEGER NOT NULL DEFAULT 1, "
+                "recorded_at TEXT NOT NULL"
+                ")"
+            )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(worker_token_usage)")}
+            for column in ("model", "effort", "progress"):
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE worker_token_usage ADD COLUMN {column} TEXT")
+                    logger.info("Migration: added %s column to worker_token_usage", column)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_worker_token_usage_terminal "
+                "ON worker_token_usage (terminal_id, recorded_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_worker_token_usage_run_step "
+                "ON worker_token_usage (run_id, step_id, recorded_at)"
+            )
+    except Exception as e:  # noqa: BLE001 — recoverable; the worker path is best-effort
+        logger.debug(f"worker_token_usage migration skipped: {e}")
+
+
 def _migrate_terminals_schema() -> None:
     """Add allowed_tools and shell_command columns to terminals table if missing (schema migration)."""
     import sqlite3
@@ -496,6 +546,125 @@ def _migrate_terminals_schema() -> None:
         conn.close()
     except Exception as e:
         logger.warning(f"Migration check for terminals schema failed: {e}")
+
+
+def record_worker_token_usage(
+    *,
+    terminal_id: str,
+    provider: str,
+    agent: str,
+    usage: Any,
+    run_id: Optional[str] = None,
+    step_id: Optional[str] = None,
+    progress: Optional[str] = None,
+) -> str:
+    """Persist one completed worker attempt and return its record id."""
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    record_id = str(uuid.uuid4())
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        conn.execute(
+            "INSERT INTO worker_token_usage ("
+            "id, terminal_id, provider, agent, run_id, step_id, model, effort, "
+            "progress, input_tokens, output_tokens, total_tokens, estimated, recorded_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                record_id,
+                terminal_id,
+                provider,
+                agent,
+                run_id,
+                step_id,
+                usage.model,
+                usage.effort,
+                progress if progress is not None else usage.progress,
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.total_tokens,
+                int(usage.estimated),
+                recorded_at,
+            ),
+        )
+    return record_id
+
+
+def list_worker_token_usage(
+    *,
+    terminal_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    step_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """List durable worker usage records, newest first."""
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    limit = max(1, min(limit, 1000))
+    clauses: List[str] = []
+    values: List[Any] = []
+    for column, value in (("terminal_id", terminal_id), ("run_id", run_id), ("step_id", step_id)):
+        if value is not None:
+            clauses.append(f"{column} = ?")
+            values.append(value)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        rows = conn.execute(
+            "SELECT id, terminal_id, provider, agent, run_id, step_id, model, effort, "
+            f"progress, input_tokens, output_tokens, total_tokens, estimated, recorded_at "
+            f"FROM worker_token_usage{where} ORDER BY recorded_at DESC, id DESC LIMIT ?",
+            (*values, limit),
+        ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "terminal_id": row[1],
+            "provider": row[2],
+            "agent": row[3],
+            "run_id": row[4],
+            "step_id": row[5],
+            "model": row[6],
+            "effort": row[7],
+            "progress": row[8],
+            "input_tokens": row[9],
+            "output_tokens": row[10],
+            "total_tokens": row[11],
+            "estimated": bool(row[12]),
+            "recorded_at": row[13],
+        }
+        for row in rows
+    ]
+
+
+def get_worker_token_usage_totals(run_id: str) -> Dict[str, Dict[str, Any]]:
+    """Aggregate persisted usage by workflow step for status snapshots."""
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        rows = conn.execute(
+            "SELECT step_id, SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), "
+            "MIN(model), MIN(effort), MAX(progress), MIN(estimated) "
+            "FROM worker_token_usage WHERE run_id = ? AND step_id IS NOT NULL "
+            "GROUP BY step_id",
+            (run_id,),
+        ).fetchall()
+    return {
+        row[0]: {
+            "input_tokens": row[1] or 0,
+            "output_tokens": row[2] or 0,
+            "total_tokens": row[3] or 0,
+            "model": row[4],
+            "effort": row[5],
+            "progress": row[6],
+            "estimated": bool(row[7]),
+        }
+        for row in rows
+    }
 
 
 def create_terminal(

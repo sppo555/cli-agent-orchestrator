@@ -73,6 +73,7 @@ from cli_agent_orchestrator.models.memory import (
     MemoryType,
 )
 from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
+from cli_agent_orchestrator.models.token_usage import WorkerTokenUsageRecord
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
@@ -106,6 +107,7 @@ from cli_agent_orchestrator.services.log_writer import log_writer
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.step_output_store import _validate_key_part
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
+from cli_agent_orchestrator.services.token_usage import TokenUsage
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
 from cli_agent_orchestrator.utils.logging import setup_logging
 from cli_agent_orchestrator.utils.skills import (
@@ -198,6 +200,11 @@ class RunStepRequest(BaseModel):
     provider: str = Field(description="Provider type (e.g. 'kiro_cli', 'claude_code')")
     agent: str = Field(description="Agent profile name")
     prompt: str = Field(description="Prompt to send (caller applies any prompt shaping first)")
+    progress: Optional[str] = Field(
+        default=None,
+        max_length=1024,
+        description="Optional artifact/progress identifier to persist with worker usage",
+    )
     session_name: Optional[str] = Field(
         default=None,
         description="Existing session to create the terminal in; auto-generated if None",
@@ -310,6 +317,7 @@ class RunStepResponse(BaseModel):
     terminal_id: str
     last_message: str
     status: str
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)
 
 
 class WorkflowValidateRequest(BaseModel):
@@ -1264,6 +1272,33 @@ async def list_terminals_in_session(session_name: str) -> List[Dict]:
         )
 
 
+@app.get("/token-usage", response_model=List[WorkerTokenUsageRecord])
+async def list_token_usage(
+    terminal_id: Optional[str] = Query(default=None),
+    run_id: Optional[str] = Query(default=None),
+    step_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> List[WorkerTokenUsageRecord]:
+    """List durable worker token usage after terminals have been deleted."""
+    from cli_agent_orchestrator.clients.database import list_worker_token_usage
+
+    try:
+        rows = await asyncio.to_thread(
+            list_worker_token_usage,
+            terminal_id=terminal_id,
+            run_id=run_id,
+            step_id=step_id,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list token usage: {str(exc)}",
+        )
+    return [WorkerTokenUsageRecord.model_validate(row) for row in rows]
+
+
 @app.get("/terminals/{terminal_id}", response_model=Terminal)
 async def get_terminal(terminal_id: TerminalId) -> Terminal:
     try:
@@ -1518,11 +1553,13 @@ async def run_step(
             registry=get_plugin_registry(request),
             env_vars=body.env_vars,
             on_terminal_created=on_terminal_created,
+            progress=body.progress,
         )
         return RunStepResponse(
             terminal_id=result.terminal_id,
             last_message=result.last_message,
             status=(result.status.value if hasattr(result.status, "value") else str(result.status)),
+            token_usage=result.token_usage,
         )
     except StepExecutionError as e:
         # The step did not complete successfully. Distinguish a worker that

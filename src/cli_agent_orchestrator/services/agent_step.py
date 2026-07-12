@@ -30,6 +30,12 @@ from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.services import terminal_service
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.terminal_service import OutputMode
+from cli_agent_orchestrator.services.token_usage import (
+    estimate_token_usage,
+    persist_worker_token_usage,
+    resolve_worker_configuration,
+    resolve_worker_progress,
+)
 from cli_agent_orchestrator.utils.terminal import wait_until_status
 
 logger = logging.getLogger(__name__)
@@ -87,6 +93,7 @@ async def run_agent_step(
     registry: Optional[PluginRegistry] = None,
     env_vars: Optional[dict[str, str]] = None,
     on_terminal_created: Optional[Callable[[str], None]] = None,
+    progress: Optional[str] = None,
 ) -> AgentStepResult:
     """Run one agent step and return its result (success only).
 
@@ -267,10 +274,30 @@ async def run_agent_step(
         terminal_service.get_output, terminal_id, OutputMode.LAST
     )
 
+    model, effort = resolve_worker_configuration(provider, agent)
+    progress = resolve_worker_progress(progress, prompt, last_message)
+    usage = estimate_token_usage(
+        prompt, last_message, model=model, effort=effort, progress=progress
+    )
     result = AgentStepResult(
         terminal_id=terminal_id,
         last_message=last_message,
         status=TerminalStatus.COMPLETED,
+        token_usage=usage,
+    )
+
+    # Persist before teardown so the record survives terminal deletion. The
+    # database path is best-effort and must never turn completed work into a
+    # failed worker step.
+    await asyncio.to_thread(
+        persist_worker_token_usage,
+        terminal_id=terminal_id,
+        provider=provider,
+        agent=agent,
+        usage=usage,
+        run_id=(env_vars or {}).get("CAO_WORKFLOW_RUN_ID"),
+        step_id=(env_vars or {}).get("CAO_WORKFLOW_STEP_ID"),
+        progress=progress,
     )
 
     if teardown and created_here:
