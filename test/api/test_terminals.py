@@ -620,6 +620,7 @@ class TestWebSocketSubprocessTerm:
                 "get_terminal_metadata",
                 return_value={"tmux_session": "cao-s", "tmux_window": "w"},
             ),
+            patch.object(main_module.subprocess, "run"),
             patch.object(main_module.subprocess, "Popen", side_effect=capture_and_stop),
             patch.object(main_module.pty, "openpty", return_value=(100, 101)),
             patch.object(main_module.fcntl, "ioctl"),
@@ -635,6 +636,71 @@ class TestWebSocketSubprocessTerm:
             "the parent's broken TERM (issue #150)"
         )
         assert passed_env["TERM"] == "xterm-256color"
+
+
+class TestWebSocketGroupedViewerSession:
+    """Regression guard for the shared-current-window bug.
+
+    Attaching directly to the CAO session made every attached tmux client
+    (other browser viewers and a local ``tmux attach``) jump to whatever
+    window the newest viewer selected, because a session has a single shared
+    active window. The fix gives each WebSocket its own grouped viewer session
+    so window selection is isolated per connection.
+    """
+
+    @pytest.mark.asyncio
+    async def test_attach_targets_isolated_grouped_session(self):
+        """``terminal_ws`` must create a grouped viewer session and attach to
+        *that* session, never directly to the shared CAO session."""
+        from cli_agent_orchestrator.api import main as main_module
+
+        ws = MagicMock()
+        ws.client = MagicMock(host="127.0.0.1")
+        ws.accept = AsyncMock()
+        ws.close = AsyncMock()
+
+        run_calls: list = []
+        captured: Dict[str, object] = {}
+
+        def record_run(*args, **kwargs):
+            run_calls.append(args[0])
+            return MagicMock(returncode=0)
+
+        def capture_and_stop(*args, **kwargs):
+            captured["args"] = args
+            raise _StopHere("captured Popen args")
+
+        with (
+            patch.dict("os.environ", {"TERM": "xterm-256color", "HOME": "/root"}, clear=True),
+            patch.object(
+                main_module,
+                "get_terminal_metadata",
+                return_value={"tmux_session": "cao-s", "tmux_window": "w"},
+            ),
+            patch.object(main_module.subprocess, "run", side_effect=record_run),
+            patch.object(main_module.subprocess, "Popen", side_effect=capture_and_stop),
+            patch.object(main_module.pty, "openpty", return_value=(100, 101)),
+            patch.object(main_module.fcntl, "ioctl"),
+            patch.object(main_module.fcntl, "fcntl"),
+            patch.object(main_module.os, "close"),
+        ):
+            with pytest.raises(_StopHere):
+                await main_module.terminal_ws(ws, "abcd1234")
+
+        # A grouped viewer session must be created off the CAO session.
+        new_session_cmds = [cmd for cmd in run_calls if "new-session" in cmd]
+        assert new_session_cmds, "expected a `tmux new-session` grouped-session call"
+        new_cmd = new_session_cmds[0]
+        assert "-t" in new_cmd and new_cmd[new_cmd.index("-t") + 1] == "cao-s"
+        viewer_session = new_cmd[new_cmd.index("-s") + 1]
+        assert viewer_session != "cao-s"
+        assert viewer_session.startswith("caoview_")
+        assert ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"] in run_calls
+
+        # The attach must target the isolated viewer session, NOT the shared one.
+        attach_cmd = captured["args"][0]  # type: ignore[index]
+        assert attach_cmd[-1] == f"{viewer_session}:w"
+        assert f"cao-s:w" not in attach_cmd
 
 
 class _StopHere(Exception):
