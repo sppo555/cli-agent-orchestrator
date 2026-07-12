@@ -135,6 +135,14 @@ describe('API wrapper', () => {
     expect(result).toEqual(flows)
   })
 
+  it('listTokenUsage fetches the durable usage endpoint with a limit', async () => {
+    const usage = [{ id: 'u1', total_tokens: 123 }]
+    mockResponse(usage)
+    const result = await api.listTokenUsage({ limit: 25 })
+    expect(result).toEqual(usage)
+    expect(mockFetch).toHaveBeenCalledWith('/token-usage?limit=25', expect.any(Object))
+  })
+
   it('createFlow sends POST with JSON body', async () => {
     const flow = { name: 'new-flow', schedule: '0 9 * * *', agent_profile: 'dev', prompt_template: 'Do stuff' }
     mockResponse(flow)

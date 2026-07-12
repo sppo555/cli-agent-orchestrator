@@ -7,14 +7,16 @@ import { AgentPanel } from './components/AgentPanel'
 import { FlowsPanel } from './components/FlowsPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { SettingsPanel } from './components/SettingsPanel'
-import { Bot, Home, Clock, Settings, Brain, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
+import { TokenUsagePanel } from './components/TokenUsagePanel'
+import { Bot, Home, Clock, Settings, Brain, BarChart3, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
 
-type TabKey = 'home' | 'agents' | 'flows' | 'settings' | 'memory'
+type TabKey = 'home' | 'agents' | 'usage' | 'flows' | 'settings' | 'memory'
 
 // Memory appended last so Alt+N numbering of existing tabs never shifts
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'home', label: 'Home', icon: <Home size={16} /> },
   { key: 'agents', label: 'Agents', icon: <Bot size={16} /> },
+  { key: 'usage', label: 'Token Usage', icon: <BarChart3 size={16} /> },
   { key: 'flows', label: 'Flows', icon: <Clock size={16} /> },
   { key: 'settings', label: 'Settings', icon: <Settings size={16} /> },
   { key: 'memory', label: 'Memory', icon: <Brain size={16} /> },
@@ -143,6 +145,7 @@ export default function App() {
           <Suspense fallback={<div className="text-gray-500 text-sm py-12 text-center">Loading...</div>}>
             {tab === 'home' && <DashboardHome onNavigate={(t) => setTab(t as TabKey)} />}
             {tab === 'agents' && <AgentPanel />}
+            {tab === 'usage' && <TokenUsagePanel />}
             {tab === 'flows' && <FlowsPanel />}
             {tab === 'settings' && <SettingsPanel />}
             {tab === 'memory' && <MemoryPanel />}
