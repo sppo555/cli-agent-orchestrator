@@ -7,7 +7,7 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 - Repo: `/Users/alex/Developer/cli-agent-orchestrator`
 - Integration branch: `cao-tailscale-integration`
 - Base: `origin/main` at `deebf65` (previous: `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
-- Integration tip: `ed7c246` (2026-07-12 fork-sync rebuild; previous tip `8c7416c`)
+- Integration tip: `4cf4976` (4.15 token usage merge after the 2026-07-12 fork-sync rebuild; previous tip `8c7416c`)
 - Local package customizations included here:
   - 4.1 Codex pyte status
   - 4.3 Claude Code `--effort`
@@ -16,8 +16,9 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
   - 4.7 Web terminal clipboard shortcuts
   - 4.11 Web terminal viewer isolation
   - 4.12 Web terminal PageUp/PageDown scroll
-  - 4.13 worker init headless render-viewer
+- 4.13 worker init headless render-viewer
 - 4.14 worker init status recovery from `UNKNOWN`
+- 4.15 durable worker token usage context, including model, effort, and progress/artifact path
 
 ## Latest Sync Notes (2026-07-12)
 
@@ -127,6 +128,12 @@ Extends `StatusMonitor.get_status()` so polling callers recover when worker init
 - pyte rendered-screen detection still has priority, but if it returns `UNKNOWN`, polling falls back to raw-buffer detection instead of treating lack of screen signal as final.
 
 Reason: after 4.13 made unattended worker frames visible, a remaining edge case still left Claude planner init at `UNKNOWN`: the ready prompt existed in tmux/API output, but cached status had not been updated. Live validation after reinstall/restart showed planner `89e1b022` transition `unknown → completed`, `wait_until_status` reached `completed`, and the terminal was created successfully.
+
+### 4.15 Durable worker token usage context
+
+The integration now persists one row for every completed `run_agent_step` attempt before the terminal is torn down. Each row contains the estimated input/output/total tokens, provider, agent, model, effort, run/step identity, timestamp, and optional progress/artifact path.
+
+Records remain queryable after terminal deletion through `GET /token-usage`, filtered by `terminal_id`, `run_id`, or `step_id`. A workflow step can set `progress` to an artifact path such as `.cao/worker-results/20260713T010600Z-v0.7.0-slice7-admin-reset-plan-review-r2-reviewer.md`; if omitted, CAO infers a matching `.cao/worker-results/...` path from the worker prompt or final response.
 
 ## Deferred / Proposed Package Work
 

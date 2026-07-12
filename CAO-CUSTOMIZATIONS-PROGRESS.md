@@ -8,7 +8,7 @@
 
 - 4.2 is no longer local customization work. Antigravity CLI provider was merged upstream in `086e61a` / awslabs#323.
 - 4.5 is not in this repo. The 9-worker model selection work belongs to `/Users/alex/Developer/CAO-Tailscale` and has already been implemented there.
-- This repo now carries package-level customizations 4.1, 4.3, 4.4, 4.6, 4.7, 4.11, 4.12, 4.13, and 4.14.
+- This repo now carries package-level customizations 4.1, 4.3, 4.4, 4.6, 4.7, 4.11, 4.12, 4.13, 4.14, and 4.15.
 - 4.8 was investigated and implemented on its own branch, but was reverted from the integration branch. Keep the branch for reference; do not merge it until the cleanup behavior is redesigned.
 - 4.9 and 4.10 were merged into a single **profile-only** version and implemented in `/Users/alex/Developer/CAO-Tailscale` (workers/supervisor profiles), not in this package repo. 4.8 is explicitly not adopted by that version.
 
@@ -29,7 +29,8 @@
 | 4.12 Web terminal PageUp/PageDown scroll | `custom/4.7 + 4.11` | 4.7 + 4.11 | `eb65a02` | Done; resolved dependency conflict, keeps mouse-off and viewer sizing |
 | 4.13 Worker init headless render-viewer | `custom/4.13-worker-init-headless-viewer` | `deebf65` | `c63ba38` | Done; viewer sizing is session-scoped |
 | 4.14 Worker init status recovery from UNKNOWN | `custom/4.14-worker-init-status-recovery` | `custom/4.6-status-turn-boundary` | `0bfb7d7` | Done |
-| Integration | `cao-tailscale-integration` | `deebf65` | `ed7c246` | Rebuilt 2026-07-12 |
+| 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
+| Integration | `cao-tailscale-integration` | `deebf65` | `4cf4976` | 4.15 merged after 2026-07-12 rebuild |
 
 ## 2026-07-12 Sync Record
 
@@ -190,6 +191,14 @@
   - For providers using pyte rendered-screen detection, if screen detection returns `UNKNOWN`, polling falls back to raw-buffer detection instead of treating `UNKNOWN` as final.
 - Purpose: after 4.13, the ready frame can be present in the buffer while the cached status remains `UNKNOWN` or pyte screen detection has no signal. Polling now recovers to `IDLE` / `COMPLETED` instead of timing out.
 - Live validation: after reinstall/restart, planner `89e1b022` (`planner-7c8b`, Claude Opus 4.8 high) transitioned `unknown → completed`, `wait_until_status` reached `completed`, and the terminal was created successfully.
+
+### 4.15 Durable worker token usage context
+
+- Branch: `custom/4.15-worker-token-usage`
+- Commit: `ec5b396`; merged into `cao-tailscale-integration` with `--no-ff`.
+- Persists one usage record per completed worker attempt before terminal teardown.
+- Records token estimates, provider, agent, model, effort, run/step identity, and optional progress/artifact path.
+- `GET /token-usage` lists records after the terminal has been deleted; progress can be supplied explicitly or inferred from `.cao/worker-results/...` in the worker prompt/reply.
 
 ## Validation
 
