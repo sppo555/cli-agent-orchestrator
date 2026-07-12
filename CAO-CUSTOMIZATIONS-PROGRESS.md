@@ -30,7 +30,7 @@
 | 4.13 Worker init headless render-viewer | `custom/4.13-worker-init-headless-viewer` | `deebf65` | `c63ba38` | Done; viewer sizing is session-scoped |
 | 4.14 Worker init status recovery from UNKNOWN | `custom/4.14-worker-init-status-recovery` | `custom/4.6-status-turn-boundary` | `0bfb7d7` | Done |
 | 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
-| Integration | `cao-tailscale-integration` | `deebf65` | `4cf4976` | 4.15 merged after 2026-07-12 rebuild |
+| Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
 
 ## 2026-07-12 Sync Record
 

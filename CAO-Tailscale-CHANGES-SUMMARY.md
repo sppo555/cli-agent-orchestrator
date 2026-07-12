@@ -7,7 +7,7 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 - Repo: `/Users/alex/Developer/cli-agent-orchestrator`
 - Integration branch: `cao-tailscale-integration`
 - Base: `origin/main` at `deebf65` (previous: `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
-- Integration tip: `4cf4976` (4.15 token usage merge after the 2026-07-12 fork-sync rebuild; previous tip `8c7416c`)
+- Integration tip: `ea9320c` (4.15 token usage documentation after the 2026-07-12 fork-sync rebuild; merge tip `4cf4976`, previous tip `8c7416c`)
 - Local package customizations included here:
   - 4.1 Codex pyte status
   - 4.3 Claude Code `--effort`
