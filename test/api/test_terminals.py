@@ -697,10 +697,63 @@ class TestWebSocketGroupedViewerSession:
         assert viewer_session.startswith("caoview_")
         assert ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"] in run_calls
 
+        # Wheel handling must be isolated to this viewer session. Changing the
+        # global root key table would affect unrelated local tmux clients.
+        assert ["tmux", "set-option", "-t", viewer_session, "mouse", "off"] in run_calls
+        assert not any(cmd[:4] == ["tmux", "bind-key", "-T", "root"] for cmd in run_calls)
+
         # The attach must target the isolated viewer session, NOT the shared one.
         attach_cmd = captured["args"][0]  # type: ignore[index]
         assert attach_cmd[-1] == f"{viewer_session}:w"
         assert f"cao-s:w" not in attach_cmd
+
+
+class TestWebSocketViewerScroll:
+    """Regression guard for Web terminal PageUp/PageDown behavior."""
+
+    def test_scroll_up_enters_tmux_copy_mode(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "up")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "copy-mode", "-u", "-t", "caoview_123:reviewer"],
+            check=False,
+            capture_output=True,
+        )
+
+    def test_scroll_down_pages_tmux_copy_mode_down(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "down")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "caoview_123:reviewer", "-X", "page-down"],
+            check=False,
+            capture_output=True,
+        )
+
+    def test_unknown_scroll_direction_is_ignored(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._scroll_tmux_viewer("caoview_123", "reviewer", "sideways")
+
+        mock_run.assert_not_called()
+
+    def test_cancel_copy_mode_before_normal_input(self):
+        from cli_agent_orchestrator.api import main as main_module
+
+        with patch.object(main_module.subprocess, "run") as mock_run:
+            main_module._cancel_tmux_viewer_copy_mode("caoview_123", "reviewer")
+
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "caoview_123:reviewer", "-X", "cancel"],
+            check=False,
+            capture_output=True,
+        )
 
 
 class _StopHere(Exception):
