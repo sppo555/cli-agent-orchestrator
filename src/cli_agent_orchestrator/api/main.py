@@ -1962,6 +1962,15 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
             check=False,
             capture_output=True,
         )
+        # CAO's detached source session may have a fixed manual size (for
+        # example 220x50). Give only this short-lived grouped viewer a
+        # client-driven sizing policy so the browser's PTY resize redraws the
+        # full xterm viewport instead of leaving stale cells on the right.
+        subprocess.run(
+            ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"],
+            check=False,
+            capture_output=True,
+        )
     except (subprocess.CalledProcessError, OSError):
         await websocket.close(code=4011, reason="Failed to create terminal viewer session")
         return
