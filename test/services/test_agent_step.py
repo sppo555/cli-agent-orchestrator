@@ -69,6 +69,10 @@ class TestHappyPath:
         assert result.terminal_id == "abc12345"
         assert result.last_message == "the answer"
         assert result.status == TerminalStatus.COMPLETED
+        assert result.token_usage.input_tokens == 3
+        assert result.token_usage.output_tokens == 3
+        assert result.token_usage.total_tokens == 6
+        assert result.token_usage.estimated is True
         # Canonical sequence: created, prompt sent, output extracted in LAST mode.
         m_create.assert_awaited_once()
         m_send.assert_called_once_with("abc12345", "do the task")

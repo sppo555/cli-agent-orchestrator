@@ -10,6 +10,7 @@ import pytest
 
 from cli_agent_orchestrator.constants import TERMINALS_RUN_STEP_ROUTE
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.services.agent_step import StepExecutionError
 
 _RUN_STEP = "cli_agent_orchestrator.api.main.run_agent_step"
@@ -27,6 +28,7 @@ class TestRunStepEndpoint:
             terminal_id="abc12345",
             last_message="all done",
             status=TerminalStatus.COMPLETED,
+            token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
         )
         with patch(_RUN_STEP, new=AsyncMock(return_value=result)) as m_run:
             resp = client.post(TERMINALS_RUN_STEP_ROUTE, json=_body())
@@ -36,6 +38,15 @@ class TestRunStepEndpoint:
         assert data["terminal_id"] == "abc12345"
         assert data["last_message"] == "all done"
         assert data["status"] == "completed"
+        assert data["token_usage"] == {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "total_tokens": 5,
+            "estimated": True,
+            "model": None,
+            "effort": None,
+            "progress": None,
+        }
         # The handler forwarded the request fields to the substrate.
         kwargs = m_run.await_args.kwargs
         assert kwargs["provider"] == "kiro_cli"
