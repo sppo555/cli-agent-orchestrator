@@ -1,4 +1,16 @@
-import { WorkerTokenUsageRecord } from './token-types'
+import { WorkerTokenUsagePage, WorkerTokenUsageRecord, WorkerTokenUsageSummary } from './token-types'
+
+export interface TokenUsageQuery {
+  provider?: string[]
+  agent?: string[]
+  model?: string[]
+  effort?: string[]
+  from?: string
+  to?: string
+  limit?: number
+  cursor?: string
+  snapshotAt?: string
+}
 
 async function fetchTokenJSON<T>(url: string, timeoutMs = 10000): Promise<T> {
   const controller = new AbortController()
@@ -13,6 +25,28 @@ async function fetchTokenJSON<T>(url: string, timeoutMs = 10000): Promise<T> {
 }
 
 export const tokenApi = {
+  listTokenUsagePage: (filters: TokenUsageQuery = {}) => {
+    const params = new URLSearchParams()
+    for (const field of ['provider', 'agent', 'model', 'effort'] as const) {
+      for (const value of filters[field] || []) params.append(field, value)
+    }
+    if (filters.from) params.set('from', filters.from)
+    if (filters.to) params.set('to', filters.to)
+    params.set('limit', String(filters.limit ?? 100))
+    if (filters.cursor) params.set('cursor', filters.cursor)
+    if (filters.snapshotAt) params.set('snapshot_at', filters.snapshotAt)
+    return fetchTokenJSON<WorkerTokenUsagePage>(`/token-usage/page?${params.toString()}`)
+  },
+  summarizeTokenUsage: (filters: Omit<TokenUsageQuery, 'limit' | 'cursor'> = {}) => {
+    const params = new URLSearchParams()
+    for (const field of ['provider', 'agent', 'model', 'effort'] as const) {
+      for (const value of filters[field] || []) params.append(field, value)
+    }
+    if (filters.from) params.set('from', filters.from)
+    if (filters.to) params.set('to', filters.to)
+    if (filters.snapshotAt) params.set('snapshot_at', filters.snapshotAt)
+    return fetchTokenJSON<WorkerTokenUsageSummary>(`/token-usage/summary?${params.toString()}`)
+  },
   listTokenUsage: (filters?: { terminalId?: string; runId?: string; stepId?: string; limit?: number }) => {
     const params = [
       filters?.terminalId ? `terminal_id=${encodeURIComponent(filters.terminalId)}` : '',

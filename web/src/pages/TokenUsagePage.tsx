@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { tokenApi } from '../token-api'
-import { WorkerTokenUsageRecord } from '../token-types'
-import { dailyStats, displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, modelStats, sum, toggleValue, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
+import { WorkerTokenUsageRecord, WorkerTokenUsageSummary } from '../token-types'
+import { displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, rangeBounds, toggleValue, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
 import { BarChart3, Check, ChevronDown, Clock3, Database, Filter, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 
 function FilterGroup({
@@ -71,6 +71,10 @@ function StatCard({ label, value, detail, tone, icon }: { label: string; value: 
 
 export function TokenUsagePage() {
   const [records, setRecords] = useState<WorkerTokenUsageRecord[]>([])
+  const [summary, setSummary] = useState<WorkerTokenUsageSummary | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [snapshotAt, setSnapshotAt] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -79,21 +83,51 @@ export function TokenUsagePage() {
   const [sort, setSort] = useState<SortKey>('latest')
   const [query, setQuery] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(true)
+  const requestSequence = useRef(0)
+
+  const serverQuery = useMemo(() => ({
+    ...filters,
+    ...rangeBounds(range),
+  }), [filters, range])
 
   const loadRecords = useCallback(async (isRefresh = false) => {
+    const sequence = ++requestSequence.current
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
     try {
-      const data = await tokenApi.listTokenUsage({ limit: 1000 })
-      setRecords(data)
+      const page = await tokenApi.listTokenUsagePage({ ...serverQuery, limit: 100 })
+      const data = await tokenApi.summarizeTokenUsage({ ...serverQuery, snapshotAt: page.snapshot_at })
+      if (sequence !== requestSequence.current) return
+      setRecords(page.records)
+      setNextCursor(page.next_cursor)
+      setSnapshotAt(page.snapshot_at)
+      setSummary(data)
       setError(null)
     } catch (err) {
+      if (sequence !== requestSequence.current) return
       setError(err instanceof Error ? err.message : 'Unable to load token usage')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (sequence === requestSequence.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [])
+  }, [serverQuery])
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || !snapshotAt || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await tokenApi.listTokenUsagePage({ ...serverQuery, limit: 100, cursor: nextCursor, snapshotAt })
+      setRecords(current => [...current, ...page.records])
+      setNextCursor(page.next_cursor)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load more token usage')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, nextCursor, serverQuery, snapshotAt])
 
   useEffect(() => {
     loadRecords()
@@ -102,24 +136,24 @@ export function TokenUsagePage() {
   }, [loadRecords])
 
   const options = useMemo(() => ({
-    provider: [...new Set(records.map(row => row.provider))].sort(),
-    agent: [...new Set(records.map(row => row.agent))].sort(),
-    model: [...new Set(records.map(row => row.model || ''))].sort((a, b) => labelFor(a).localeCompare(labelFor(b))),
-    effort: [...new Set(records.map(row => row.effort || ''))].sort((a, b) => labelFor(a).localeCompare(labelFor(b))),
-  }), [records])
+    provider: summary?.by_provider.map(bucket => bucket.value).filter((value): value is string => value !== null).sort() || [],
+    agent: summary?.by_agent.map(bucket => bucket.value).filter((value): value is string => value !== null).sort() || [],
+    model: summary?.by_model.map(bucket => bucket.value || '').sort((a, b) => labelFor(a).localeCompare(labelFor(b))) || [],
+    effort: summary?.by_effort.map(bucket => bucket.value || '').sort((a, b) => labelFor(a).localeCompare(labelFor(b))) || [],
+  }), [summary])
 
   const filteredRecords = useMemo(() => {
-    return filterAndSortRecords(records, filters, range, query, sort)
-  }, [records, filters, range, query, sort])
+    return filterAndSortRecords(records, filters, 'all', query, sort)
+  }, [records, filters, query, sort])
 
-  const totals = useMemo(() => ({
-    input: sum(filteredRecords, 'input_tokens'),
-    output: sum(filteredRecords, 'output_tokens'),
-    total: sum(filteredRecords, 'total_tokens'),
-  }), [filteredRecords])
+  const totals = {
+    input: summary?.input_tokens || 0,
+    output: summary?.output_tokens || 0,
+    total: summary?.total_tokens || 0,
+  }
 
-  const usageByDay = useMemo(() => dailyStats(filteredRecords), [filteredRecords])
-  const usageByModel = useMemo(() => modelStats(filteredRecords), [filteredRecords])
+  const usageByDay = useMemo<[string, number][]>(() => (summary?.daily || []).slice(-7).map(bucket => [bucket.value || '', bucket.total_tokens]), [summary])
+  const usageByModel = useMemo<[string, number][]>(() => (summary?.by_model || []).slice(0, 5).map(bucket => [bucket.value || 'provider default', bucket.total_tokens]), [summary])
 
   const maxDay = Math.max(...usageByDay.map(([, value]) => value), 1)
   const maxModel = Math.max(...usageByModel.map(([, value]) => value), 1)
@@ -164,7 +198,7 @@ export function TokenUsagePage() {
         <StatCard label="Total tokens" value={formatTokens(totals.total)} detail={`${formatExact(totals.total)} in current view`} tone="bg-emerald-950/60" icon={<BarChart3 size={18} className="text-emerald-400" />} />
         <StatCard label="Input tokens" value={formatTokens(totals.input)} detail="Prompt and context" tone="bg-cyan-950/60" icon={<span className="text-sm font-bold text-cyan-400">IN</span>} />
         <StatCard label="Output tokens" value={formatTokens(totals.output)} detail="Worker responses" tone="bg-violet-950/60" icon={<span className="text-sm font-bold text-violet-400">OUT</span>} />
-        <StatCard label="Completed attempts" value={formatExact(filteredRecords.length)} detail={filteredRecords.length ? `${formatTokens(Math.round(totals.total / filteredRecords.length))} average / attempt` : 'No records match'} tone="bg-amber-950/60" icon={<Clock3 size={18} className="text-amber-400" />} />
+        <StatCard label="Completed attempts" value={formatExact(summary?.attempts || 0)} detail={summary?.attempts ? `${formatTokens(Math.round(totals.total / summary.attempts))} average / attempt` : 'No records match'} tone="bg-amber-950/60" icon={<Clock3 size={18} className="text-amber-400" />} />
       </div>
 
       <div className="flex flex-col gap-4 rounded-xl border border-gray-800 bg-gray-900/60 p-4 xl:flex-row">
@@ -210,7 +244,7 @@ export function TokenUsagePage() {
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,1fr)]">
             <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-              <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-white">Usage by day</h3><p className="mt-1 text-xs text-gray-500">Last 7 days in the current view</p></div><span className="text-xs text-gray-500">{filteredRecords.length} attempts</span></div>
+              <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-white">Usage by day</h3><p className="mt-1 text-xs text-gray-500">Last 7 days in the current view</p></div><span className="text-xs text-gray-500">{summary?.attempts || 0} attempts</span></div>
               {usageByDay.length ? (
                 <div className="mt-5 flex h-36 items-end gap-2 sm:gap-3">
                   {usageByDay.map(([day, value]) => (
@@ -230,10 +264,11 @@ export function TokenUsagePage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/60">
-            <div className="flex flex-col gap-2 border-b border-gray-800 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold text-white">Worker attempts</h3><p className="mt-1 text-xs text-gray-500">Each row is persisted before the worker terminal is torn down.</p></div><span className="text-xs text-gray-500">Showing {filteredRecords.length} of {records.length}</span></div>
-            {loading ? <div className="px-4 py-12 text-center text-sm text-gray-500">Loading token usage…</div> : filteredRecords.length === 0 ? <div className="px-4 py-12 text-center"><Database size={24} className="mx-auto text-gray-700" /><p className="mt-3 text-sm text-gray-400">{records.length ? 'No records match these filters.' : 'No worker usage records yet.'}</p><p className="mt-1 text-xs text-gray-600">{records.length ? 'Try clearing a label or changing the time range.' : 'Complete a worker attempt after restarting the CAO server migration.'}</p></div> : (
+            <div className="flex flex-col gap-2 border-b border-gray-800 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold text-white">Worker attempts</h3><p className="mt-1 text-xs text-gray-500">Each row is persisted before the worker terminal is torn down.</p></div><span className="text-xs text-gray-500">Showing {filteredRecords.length} loaded of {summary?.attempts || 0}</span></div>
+            {loading ? <div className="px-4 py-12 text-center text-sm text-gray-500">Loading token usage…</div> : filteredRecords.length === 0 ? <div className="px-4 py-12 text-center"><Database size={24} className="mx-auto text-gray-700" /><p className="mt-3 text-sm text-gray-400">{summary?.attempts ? 'No loaded records match this search.' : 'No worker usage records yet.'}</p><p className="mt-1 text-xs text-gray-600">{summary?.attempts ? 'Try clearing the search or loading another page.' : 'Complete a worker attempt after restarting the CAO server migration.'}</p></div> : (
               <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead className="bg-gray-950/50 text-[10px] uppercase tracking-wider text-gray-500"><tr><th className="px-4 py-3 font-semibold">Recorded</th><th className="px-4 py-3 font-semibold">Progress</th><th className="px-4 py-3 font-semibold">Worker</th><th className="px-4 py-3 font-semibold">Model / effort</th><th className="px-4 py-3 text-right font-semibold">Tokens</th><th className="px-4 py-3 text-right font-semibold">In / out</th></tr></thead><tbody className="divide-y divide-gray-800/80">{filteredRecords.map(row => <tr key={row.id} className="transition hover:bg-gray-800/30"><td className="whitespace-nowrap px-4 py-3 align-top"><div className="text-xs text-gray-300">{displayDate(row.recorded_at)}</div><div className="mt-1 text-[10px] text-gray-600">{row.estimated ? 'estimated' : 'provider reported'}</div></td><td className="max-w-[300px] px-4 py-3 align-top"><div className="truncate text-xs text-emerald-300" title={row.progress || undefined}>{getPathLabel(row.progress)}</div>{row.step_id && <div className="mt-1 text-[10px] text-gray-600">step: {row.step_id}</div>}</td><td className="px-4 py-3 align-top"><div className="text-xs font-medium text-gray-300">{row.agent}</div><div className="mt-1 text-[10px] capitalize text-gray-600">{displayProvider(row.provider)}</div></td><td className="px-4 py-3 align-top"><div className="max-w-[180px] truncate text-xs text-gray-300" title={row.model || undefined}>{labelFor(row.model)}</div><div className="mt-1 text-[10px] text-gray-500">effort: {labelFor(row.effort)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-sm font-semibold text-white">{formatExact(row.total_tokens)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-xs text-gray-400">{formatExact(row.input_tokens)} / {formatExact(row.output_tokens)}</div></td></tr>)}</tbody></table></div>
             )}
+            {!loading && nextCursor && <div className="border-t border-gray-800 px-4 py-4 text-center"><button type="button" onClick={loadMore} disabled={loadingMore} className="inline-flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-gray-300 transition hover:border-emerald-500/60 hover:text-white disabled:opacity-50"><RefreshCw size={14} className={loadingMore ? 'animate-spin' : ''} />{loadingMore ? 'Loading…' : 'Load more'}</button></div>}
           </div>
         </div>
       </div>

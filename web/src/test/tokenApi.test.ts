@@ -16,6 +16,24 @@ describe('Token API wrapper', () => {
     expect(fetchMock).toHaveBeenCalledWith('/token-usage?limit=1000', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
+  it('serializes repeated page filters and cursor state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await tokenApi.listTokenUsagePage({ provider: ['codex', 'claude_code'], model: ['__default__'], from: '2026-07-01T00:00:00.000Z', limit: 25, cursor: 'abc', snapshotAt: '2026-07-13T00:00:00.000Z' })
+
+    expect(fetchMock).toHaveBeenCalledWith('/token-usage/page?provider=codex&provider=claude_code&model=__default__&from=2026-07-01T00%3A00%3A00.000Z&limit=25&cursor=abc&snapshot_at=2026-07-13T00%3A00%3A00.000Z', expect.any(Object))
+  })
+
+  it('serializes summary filters without pagination parameters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await tokenApi.summarizeTokenUsage({ agent: ['planner'], to: '2026-07-13T00:00:00.000Z' })
+
+    expect(fetchMock).toHaveBeenCalledWith('/token-usage/summary?agent=planner&to=2026-07-13T00%3A00%3A00.000Z', expect.any(Object))
+  })
+
   it('encodes all legacy filters', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve([]) })
     vi.stubGlobal('fetch', fetchMock)

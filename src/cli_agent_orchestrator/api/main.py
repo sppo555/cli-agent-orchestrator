@@ -1,6 +1,8 @@
 """Single FastAPI entry point for all HTTP routes."""
 
 import asyncio
+import base64
+import binascii
 import fcntl
 import json
 import logging
@@ -13,9 +15,9 @@ import subprocess
 import termios
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional, cast
+from typing import Annotated, Any, Dict, List, Optional, Tuple, cast
 
 from fastapi import (
     BackgroundTasks,
@@ -1270,6 +1272,207 @@ async def list_terminals_in_session(session_name: str) -> List[Dict]:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list terminals: {str(e)}",
         )
+
+
+class TokenUsageBucket(BaseModel):
+    value: Optional[str] = None
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class WorkerTokenUsagePage(BaseModel):
+    records: List[WorkerTokenUsageRecord]
+    next_cursor: Optional[str] = None
+    has_more: bool
+    snapshot_at: str
+
+
+class WorkerTokenUsageSummary(BaseModel):
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    daily: List[TokenUsageBucket]
+    by_provider: List[TokenUsageBucket]
+    by_agent: List[TokenUsageBucket]
+    by_model: List[TokenUsageBucket]
+    by_effort: List[TokenUsageBucket]
+    snapshot_at: str
+
+
+_TOKEN_USAGE_CURSOR_VERSION = 1
+
+
+def _token_usage_snapshot(value: Optional[str]) -> str:
+    from cli_agent_orchestrator.clients.database import normalize_worker_token_usage_timestamp
+
+    if value is None:
+        return datetime.now(timezone.utc).isoformat()
+    try:
+        normalized = normalize_worker_token_usage_timestamp(value, "snapshot_at")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    assert normalized is not None
+    return normalized
+
+
+def _encode_token_usage_cursor(*, snapshot_at: str, recorded_at: str, record_id: str, fingerprint: str) -> str:
+    payload = {
+        "version": _TOKEN_USAGE_CURSOR_VERSION,
+        "snapshot_at": snapshot_at,
+        "recorded_at": recorded_at,
+        "id": record_id,
+        "fingerprint": fingerprint,
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_token_usage_cursor(cursor: str) -> Dict[str, str]:
+    from cli_agent_orchestrator.clients.database import normalize_worker_token_usage_timestamp
+
+    if not cursor or len(cursor) > 4096:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((cursor + padding).encode("ascii")))
+    except (binascii.Error, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor") from exc
+    required = {"version", "snapshot_at", "recorded_at", "id", "fingerprint"}
+    if not isinstance(payload, dict) or set(payload) != required or payload.get("version") != _TOKEN_USAGE_CURSOR_VERSION:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+    if not all(isinstance(payload[key], str) and payload[key] for key in required - {"version"}):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+    try:
+        snapshot_at = normalize_worker_token_usage_timestamp(payload["snapshot_at"], "snapshot_at")
+        recorded_at = normalize_worker_token_usage_timestamp(payload["recorded_at"], "recorded_at")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor") from exc
+    assert snapshot_at is not None and recorded_at is not None
+    return {
+        "snapshot_at": snapshot_at,
+        "recorded_at": recorded_at,
+        "id": payload["id"],
+        "fingerprint": payload["fingerprint"],
+    }
+
+
+def _token_usage_filters_or_422(**kwargs: Any) -> Any:
+    from cli_agent_orchestrator.clients.database import build_worker_token_usage_filters
+
+    try:
+        return build_worker_token_usage_filters(**kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@app.get("/token-usage/page", response_model=WorkerTokenUsagePage)
+async def page_token_usage(
+    provider: Optional[List[str]] = Query(default=None),
+    agent: Optional[List[str]] = Query(default=None),
+    model: Optional[List[str]] = Query(default=None),
+    effort: Optional[List[str]] = Query(default=None),
+    from_at: Optional[str] = Query(default=None, alias="from"),
+    to_at: Optional[str] = Query(default=None, alias="to"),
+    limit: int = Query(default=100, ge=1, le=500),
+    cursor: Optional[str] = Query(default=None),
+    snapshot_at: Optional[str] = Query(default=None),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> WorkerTokenUsagePage:
+    from cli_agent_orchestrator.clients.database import list_worker_token_usage_page
+
+    filters = _token_usage_filters_or_422(
+        provider=provider,
+        agent=agent,
+        model=model,
+        effort=effort,
+        from_at=from_at,
+        to_at=to_at,
+    )
+    boundary: Optional[Tuple[str, str]] = None
+    if cursor:
+        decoded = _decode_token_usage_cursor(cursor)
+        if decoded["fingerprint"] != filters.fingerprint():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="cursor does not match filters",
+            )
+        requested_snapshot = _token_usage_snapshot(snapshot_at) if snapshot_at else decoded["snapshot_at"]
+        if requested_snapshot != decoded["snapshot_at"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="cursor does not match snapshot",
+            )
+        snapshot = decoded["snapshot_at"]
+        boundary = (decoded["recorded_at"], decoded["id"])
+    else:
+        snapshot = _token_usage_snapshot(snapshot_at)
+    try:
+        rows, has_more = await asyncio.to_thread(
+            list_worker_token_usage_page,
+            filters,
+            snapshot_at=snapshot,
+            boundary=boundary,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to page token usage: {str(exc)}",
+        ) from exc
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = _encode_token_usage_cursor(
+            snapshot_at=snapshot,
+            recorded_at=last["recorded_at"],
+            record_id=last["id"],
+            fingerprint=filters.fingerprint(),
+        )
+    return WorkerTokenUsagePage(
+        records=[WorkerTokenUsageRecord.model_validate(row) for row in rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+        snapshot_at=snapshot,
+    )
+
+
+@app.get("/token-usage/summary", response_model=WorkerTokenUsageSummary)
+async def summary_token_usage(
+    provider: Optional[List[str]] = Query(default=None),
+    agent: Optional[List[str]] = Query(default=None),
+    model: Optional[List[str]] = Query(default=None),
+    effort: Optional[List[str]] = Query(default=None),
+    from_at: Optional[str] = Query(default=None, alias="from"),
+    to_at: Optional[str] = Query(default=None, alias="to"),
+    snapshot_at: Optional[str] = Query(default=None),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> WorkerTokenUsageSummary:
+    from cli_agent_orchestrator.clients.database import summarize_worker_token_usage
+
+    filters = _token_usage_filters_or_422(
+        provider=provider,
+        agent=agent,
+        model=model,
+        effort=effort,
+        from_at=from_at,
+        to_at=to_at,
+    )
+    snapshot = _token_usage_snapshot(snapshot_at)
+    try:
+        summary = await asyncio.to_thread(
+            summarize_worker_token_usage,
+            filters,
+            snapshot_at=snapshot,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to summarize token usage: {str(exc)}",
+        ) from exc
+    return WorkerTokenUsageSummary.model_validate(summary)
 
 
 @app.get("/token-usage", response_model=List[WorkerTokenUsageRecord])

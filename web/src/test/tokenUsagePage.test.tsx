@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { tokenApi } from '../token-api'
-import { WorkerTokenUsageRecord } from '../token-types'
+import { WorkerTokenUsagePage, WorkerTokenUsageRecord, WorkerTokenUsageSummary } from '../token-types'
 import { TokenUsagePage } from '../pages/TokenUsagePage'
 
 const records: WorkerTokenUsageRecord[] = [
@@ -17,11 +17,26 @@ const records: WorkerTokenUsageRecord[] = [
   },
 ]
 
+const page = (pageRecords: WorkerTokenUsageRecord[] = records): WorkerTokenUsagePage => ({ records: pageRecords, next_cursor: null, has_more: false, snapshot_at: '2026-07-13T02:00:00+00:00' })
+const summary = (summaryRecords: WorkerTokenUsageRecord[] = records): WorkerTokenUsageSummary => ({
+  attempts: summaryRecords.length,
+  input_tokens: summaryRecords.reduce((total, row) => total + row.input_tokens, 0),
+  output_tokens: summaryRecords.reduce((total, row) => total + row.output_tokens, 0),
+  total_tokens: summaryRecords.reduce((total, row) => total + row.total_tokens, 0),
+  daily: [{ value: '2026-07-13', attempts: summaryRecords.length, input_tokens: 1800, output_tokens: 1200, total_tokens: summaryRecords.reduce((total, row) => total + row.total_tokens, 0) }],
+  by_provider: [...new Set(summaryRecords.map(row => row.provider))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+  by_agent: [...new Set(summaryRecords.map(row => row.agent))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+  by_model: [...new Set(summaryRecords.map(row => row.model))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+  by_effort: [...new Set(summaryRecords.map(row => row.effort))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+  snapshot_at: '2026-07-13T02:00:00+00:00',
+})
+
 describe('TokenUsagePage', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('renders summary totals and worker progress', async () => {
-    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue(records)
+    vi.spyOn(tokenApi, 'listTokenUsagePage').mockResolvedValue(page())
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary())
     render(<TokenUsagePage />)
 
     await waitFor(() => expect(screen.getByText('2 attempts')).toBeInTheDocument())
@@ -30,19 +45,23 @@ describe('TokenUsagePage', () => {
   })
 
   it('filters records by checked provider label', async () => {
-    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue(records)
+    vi.spyOn(tokenApi, 'listTokenUsagePage').mockImplementation(async filters => page(filters?.provider?.includes('claude_code') ? [records[0]] : records))
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockImplementation(async filters => summary(filters?.provider?.includes('claude_code') ? [records[0]] : records))
     render(<TokenUsagePage />)
 
     await waitFor(() => expect(screen.getByLabelText('Provider: claude_code')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('Provider: claude_code'))
 
-    expect(screen.getByText('…/worker-results/review.md')).toBeInTheDocument()
-    expect(screen.queryByText('…/worker-results/plan.md')).not.toBeInTheDocument()
-    expect(screen.getByText('1 attempts')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('…/worker-results/review.md')).toBeInTheDocument()
+      expect(screen.queryByText('…/worker-results/plan.md')).not.toBeInTheDocument()
+      expect(screen.getByText('1 attempts')).toBeInTheDocument()
+    })
   })
 
   it('provides a link back to the dashboard', async () => {
-    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue([])
+    vi.spyOn(tokenApi, 'listTokenUsagePage').mockResolvedValue(page([]))
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary([]))
     render(<TokenUsagePage />)
 
     expect(screen.getByRole('link', { name: /back to dashboard/i })).toHaveAttribute('href', '/')

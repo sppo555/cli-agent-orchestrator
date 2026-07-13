@@ -1,10 +1,13 @@
 """Minimal database client with only terminal metadata."""
 
 import logging
+import hashlib
+import json
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 from sqlalchemy import (
     Boolean,
@@ -517,6 +520,10 @@ def _migrate_worker_token_usage() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_worker_token_usage_run_step "
                 "ON worker_token_usage (run_id, step_id, recorded_at)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_worker_token_usage_recorded "
+                "ON worker_token_usage (recorded_at DESC, id DESC)"
+            )
     except Exception as e:  # noqa: BLE001 — recoverable; the worker path is best-effort
         logger.debug(f"worker_token_usage migration skipped: {e}")
 
@@ -637,6 +644,259 @@ def list_worker_token_usage(
         }
         for row in rows
     ]
+
+
+_TOKEN_USAGE_FILTER_FIELDS = ("provider", "agent", "model", "effort")
+_TOKEN_USAGE_NULLABLE_FIELDS = {"model", "effort"}
+_TOKEN_USAGE_DEFAULT_SENTINEL = "__default__"
+_TOKEN_USAGE_MAX_FILTER_VALUES = 25
+_TOKEN_USAGE_MAX_FILTER_VALUE_LENGTH = 200
+
+
+@dataclass(frozen=True)
+class WorkerTokenUsageFilters:
+    """Normalized filters shared by token usage page and summary queries."""
+
+    provider: Tuple[str, ...] = ()
+    agent: Tuple[str, ...] = ()
+    model: Tuple[str, ...] = ()
+    effort: Tuple[str, ...] = ()
+    from_at: Optional[str] = None
+    to_at: Optional[str] = None
+
+    def fingerprint(self) -> str:
+        payload = {
+            "provider": self.provider,
+            "agent": self.agent,
+            "model": self.model,
+            "effort": self.effort,
+            "from": self.from_at,
+            "to": self.to_at,
+        }
+        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def normalize_worker_token_usage_timestamp(value: Optional[str], name: str) -> Optional[str]:
+    """Validate and normalize a user-provided ISO-8601 UTC timestamp."""
+    if value is None:
+        return None
+    if not value or len(value) > _TOKEN_USAGE_MAX_FILTER_VALUE_LENGTH:
+        raise ValueError(f"{name} must be a non-empty ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{name} must include a timezone")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def build_worker_token_usage_filters(
+    *,
+    provider: Optional[Sequence[str]] = None,
+    agent: Optional[Sequence[str]] = None,
+    model: Optional[Sequence[str]] = None,
+    effort: Optional[Sequence[str]] = None,
+    from_at: Optional[str] = None,
+    to_at: Optional[str] = None,
+) -> WorkerTokenUsageFilters:
+    """Normalize and validate the shared page/summary filter contract."""
+
+    normalized: Dict[str, Tuple[str, ...]] = {}
+    for field in _TOKEN_USAGE_FILTER_FIELDS:
+        raw_values = list(locals()[field] or [])
+        if len(raw_values) > _TOKEN_USAGE_MAX_FILTER_VALUES:
+            raise ValueError(f"{field} has too many values")
+        values = []
+        for value in raw_values:
+            if not value or len(value) > _TOKEN_USAGE_MAX_FILTER_VALUE_LENGTH:
+                raise ValueError(f"{field} contains an invalid value")
+            if value == _TOKEN_USAGE_DEFAULT_SENTINEL and field not in _TOKEN_USAGE_NULLABLE_FIELDS:
+                raise ValueError(f"{_TOKEN_USAGE_DEFAULT_SENTINEL} is not valid for {field}")
+            if value not in values:
+                values.append(value)
+        normalized[field] = tuple(sorted(values))
+
+    normalized_from = normalize_worker_token_usage_timestamp(from_at, "from")
+    normalized_to = normalize_worker_token_usage_timestamp(to_at, "to")
+    if normalized_from and normalized_to and normalized_from > normalized_to:
+        raise ValueError("from must not be later than to")
+    return WorkerTokenUsageFilters(
+        provider=normalized["provider"],
+        agent=normalized["agent"],
+        model=normalized["model"],
+        effort=normalized["effort"],
+        from_at=normalized_from,
+        to_at=normalized_to,
+    )
+
+
+def _worker_token_usage_where(
+    filters: WorkerTokenUsageFilters,
+    *,
+    snapshot_at: Optional[str] = None,
+    boundary: Optional[Tuple[str, str]] = None,
+) -> Tuple[str, List[Any]]:
+    """Build a parameterized WHERE clause for token usage reads."""
+    clauses: List[str] = []
+    values: List[Any] = []
+    for field in _TOKEN_USAGE_FILTER_FIELDS:
+        selected = getattr(filters, field)
+        if not selected:
+            continue
+        ordinary = [value for value in selected if value != _TOKEN_USAGE_DEFAULT_SENTINEL]
+        field_clauses: List[str] = []
+        if ordinary:
+            placeholders = ", ".join("?" for _ in ordinary)
+            field_clauses.append(f"{field} IN ({placeholders})")
+            values.extend(ordinary)
+        if _TOKEN_USAGE_DEFAULT_SENTINEL in selected:
+            field_clauses.append(f"{field} IS NULL")
+        clauses.append(f"({' OR '.join(field_clauses)})")
+    if filters.from_at:
+        clauses.append("recorded_at >= ?")
+        values.append(filters.from_at)
+    if filters.to_at:
+        clauses.append("recorded_at <= ?")
+        values.append(filters.to_at)
+    if snapshot_at:
+        clauses.append("recorded_at <= ?")
+        values.append(snapshot_at)
+    if boundary:
+        last_recorded_at, last_id = boundary
+        clauses.append("(recorded_at < ? OR (recorded_at = ? AND id < ?))")
+        values.extend([last_recorded_at, last_recorded_at, last_id])
+    return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), values
+
+
+def _worker_token_usage_record(row: Sequence[Any]) -> Dict[str, Any]:
+    return {
+        "id": row[0],
+        "terminal_id": row[1],
+        "provider": row[2],
+        "agent": row[3],
+        "run_id": row[4],
+        "step_id": row[5],
+        "model": row[6],
+        "effort": row[7],
+        "progress": row[8],
+        "input_tokens": row[9],
+        "output_tokens": row[10],
+        "total_tokens": row[11],
+        "estimated": bool(row[12]),
+        "recorded_at": row[13],
+    }
+
+
+def list_worker_token_usage_page(
+    filters: WorkerTokenUsageFilters,
+    *,
+    snapshot_at: str,
+    boundary: Optional[Tuple[str, str]] = None,
+    limit: int = 100,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Read one stable keyset page and indicate whether another page exists."""
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    limit = max(1, min(limit, 500))
+    where, values = _worker_token_usage_where(filters, snapshot_at=snapshot_at, boundary=boundary)
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        rows = conn.execute(
+            "SELECT id, terminal_id, provider, agent, run_id, step_id, model, effort, "
+            f"progress, input_tokens, output_tokens, total_tokens, estimated, recorded_at "
+            f"FROM worker_token_usage{where} ORDER BY recorded_at DESC, id DESC LIMIT ?",
+            (*values, limit + 1),
+        ).fetchall()
+    has_more = len(rows) > limit
+    return [_worker_token_usage_record(row) for row in rows[:limit]], has_more
+
+
+def _worker_token_usage_aggregate(
+    conn: Any,
+    *,
+    where: str,
+    values: Sequence[Any],
+    group_by: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    group_clause = f" GROUP BY {group_by} ORDER BY SUM(total_tokens) DESC" if group_by else ""
+    rows = conn.execute(
+        "SELECT "
+        + (f"{group_by}, " if group_by else "")
+        + "COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), "
+        + "COALESCE(SUM(total_tokens), 0) FROM worker_token_usage"
+        + where
+        + group_clause,
+        tuple(values),
+    ).fetchall()
+    if group_by:
+        return [
+            {
+                "value": row[0],
+                "attempts": row[1],
+                "input_tokens": row[2],
+                "output_tokens": row[3],
+                "total_tokens": row[4],
+            }
+            for row in rows
+        ]
+    return [
+        {
+            "attempts": row[0],
+            "input_tokens": row[1],
+            "output_tokens": row[2],
+            "total_tokens": row[3],
+        }
+        for row in rows
+    ]
+
+
+def summarize_worker_token_usage(
+    filters: WorkerTokenUsageFilters,
+    *,
+    snapshot_at: str,
+) -> Dict[str, Any]:
+    """Return aggregate and grouped usage without loading records into Python."""
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    where, values = _worker_token_usage_where(filters, snapshot_at=snapshot_at)
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        totals = _worker_token_usage_aggregate(conn, where=where, values=values)[0]
+        daily = conn.execute(
+            "SELECT substr(recorded_at, 1, 10), COUNT(*), COALESCE(SUM(input_tokens), 0), "
+            "COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0) "
+            f"FROM worker_token_usage{where} GROUP BY substr(recorded_at, 1, 10) "
+            "ORDER BY substr(recorded_at, 1, 10) ASC",
+            tuple(values),
+        ).fetchall()
+        grouped = {
+            field: _worker_token_usage_aggregate(
+                conn, where=where, values=values, group_by=field
+            )
+            for field in ("provider", "agent", "model", "effort")
+        }
+    return {
+        **totals,
+        "daily": [
+            {
+                "value": row[0],
+                "attempts": row[1],
+                "input_tokens": row[2],
+                "output_tokens": row[3],
+                "total_tokens": row[4],
+            }
+            for row in daily
+        ],
+        "by_provider": grouped["provider"],
+        "by_agent": grouped["agent"],
+        "by_model": grouped["model"],
+        "by_effort": grouped["effort"],
+        "snapshot_at": snapshot_at,
+    }
 
 
 def get_worker_token_usage_totals(run_id: str) -> Dict[str, Dict[str, Any]]:

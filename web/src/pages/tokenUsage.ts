@@ -7,6 +7,12 @@ export type TokenFilters = Record<FilterKey, string[]>
 
 export const EMPTY_FILTERS: TokenFilters = { provider: [], agent: [], model: [], effort: [] }
 
+export function rangeBounds(range: RangeKey, now = new Date()): { from?: string; to?: string } {
+  const durations: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000 }
+  const duration = durations[range]
+  return duration === null ? {} : { from: new Date(now.getTime() - duration).toISOString(), to: now.toISOString() }
+}
+
 export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`
