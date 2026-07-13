@@ -86,6 +86,38 @@ def extract_claude_code_usage(raw_output: Any) -> Optional[NativeUsage]:
     return found
 
 
+def _claude_message_text(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return None
+    parts: list[str] = []
+    for block in value:
+        if not isinstance(block, Mapping):
+            continue
+        if block.get("type") in {"text", "output_text"} and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "".join(parts) or None
+
+
+def extract_claude_code_last_message(raw_output: Any) -> str:
+    """Extract the final response from Claude's structured JSON output."""
+
+    final_result: Optional[str] = None
+    assistant_message: Optional[str] = None
+    for event in _json_objects(raw_output):
+        if event.get("type") == "result":
+            result = _claude_message_text(event.get("result"))
+            if result is not None:
+                final_result = result
+        if event.get("type") == "assistant" and isinstance(event.get("message"), Mapping):
+            message = event["message"]
+            text = _claude_message_text(message.get("content"))
+            if text is not None:
+                assistant_message = text
+    return final_result if final_result is not None else (assistant_message or "")
+
+
 def extract_codex_usage(raw_output: Any) -> Optional[NativeUsage]:
     """Extract usage from Codex structured turn-completed JSONL events."""
 

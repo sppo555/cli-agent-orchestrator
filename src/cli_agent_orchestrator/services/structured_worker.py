@@ -15,6 +15,7 @@ from typing import Optional
 
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
 from cli_agent_orchestrator.models.token_usage import TokenUsage
+from cli_agent_orchestrator.providers.claude_code import ClaudeCodeProvider
 from cli_agent_orchestrator.providers.codex import CodexProvider
 from cli_agent_orchestrator.services.token_usage import (
     estimate_token_usage,
@@ -22,7 +23,10 @@ from cli_agent_orchestrator.services.token_usage import (
     resolve_worker_configuration,
     resolve_worker_progress,
 )
-from cli_agent_orchestrator.services.token_usage_adapters import extract_codex_last_message
+from cli_agent_orchestrator.services.token_usage_adapters import (
+    extract_claude_code_last_message,
+    extract_codex_last_message,
+)
 from cli_agent_orchestrator.services.token_usage_contract import extract_usage
 
 
@@ -49,26 +53,44 @@ async def run_structured_worker_step(
 ) -> AgentStepResult:
     """Run one explicit structured worker step.
 
-    Codex is the first provider enabled here. Its command is the JSONL exec
-    command and its stdout is the sole native usage source. The default
-    interactive run_agent_step path is not called or modified.
+    Claude Code and Codex each use their provider-owned machine-readable
+    stdout contract. The default interactive run_agent_step path is not called
+    or modified.
     """
 
-    if provider != "codex":
+    if provider not in {"claude_code", "codex"}:
         raise StructuredWorkerError(
             f"structured worker mode is not enabled for provider '{provider}'"
         )
     if timeout <= 0:
         raise ValueError("timeout must be greater than zero")
 
-    command_builder = CodexProvider(
-        terminal_id="structured",
-        session_name="structured",
-        window_name="structured",
-        agent_profile=agent,
-        allowed_tools=allowed_tools,
-    )
-    command = command_builder.build_structured_command()
+    terminal_id = _structured_terminal_id()
+    if provider == "codex":
+        command_builder = CodexProvider(
+            terminal_id=terminal_id,
+            session_name="structured",
+            window_name="structured",
+            agent_profile=agent,
+            allowed_tools=allowed_tools,
+        )
+        extract_last_message = extract_codex_last_message
+    else:
+        command_builder = ClaudeCodeProvider(
+            terminal_id=terminal_id,
+            session_name="structured",
+            window_name="structured",
+            agent_profile=agent,
+            allowed_tools=allowed_tools,
+        )
+        extract_last_message = extract_claude_code_last_message
+
+    try:
+        command = command_builder.build_structured_command()
+    except Exception:
+        if isinstance(command_builder, ClaudeCodeProvider):
+            command_builder.cleanup()
+        raise
     environment = os.environ.copy()
     if env_vars:
         environment.update(env_vars)
@@ -82,27 +104,37 @@ async def run_structured_worker_step(
             stderr=asyncio.subprocess.PIPE,
         )
     except OSError as exc:
-        raise StructuredWorkerError(f"failed to start structured Codex worker: {exc}") from exc
+        if isinstance(command_builder, ClaudeCodeProvider):
+            command_builder.cleanup()
+        raise StructuredWorkerError(
+            f"failed to start structured {provider} worker: {exc}"
+        ) from exc
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(input=prompt.encode("utf-8")),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise TimeoutError(f"structured Codex worker timed out after {timeout}s") from exc
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input=prompt.encode("utf-8")),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise TimeoutError(
+                f"structured {provider} worker timed out after {timeout}s"
+            ) from exc
+    finally:
+        if isinstance(command_builder, ClaudeCodeProvider):
+            command_builder.cleanup()
 
     raw_output = stdout.decode("utf-8", errors="replace")
     raw_stderr = stderr.decode("utf-8", errors="replace")
     if process.returncode != 0:
         detail = raw_stderr.strip().splitlines()[-1] if raw_stderr.strip() else "no stderr"
         raise StructuredWorkerError(
-            f"structured Codex worker exited with code {process.returncode}: {detail}"
+            f"structured {provider} worker exited with code {process.returncode}: {detail}"
         )
 
-    last_message = extract_codex_last_message(raw_output)
+    last_message = extract_last_message(raw_output)
     model, effort = resolve_worker_configuration(provider, agent)
     progress = resolve_worker_progress(progress, prompt, last_message)
     native_usage = extract_usage(provider, raw_output, last_message)
@@ -125,7 +157,6 @@ async def run_structured_worker_step(
             progress=progress,
         )
 
-    terminal_id = _structured_terminal_id()
     await asyncio.to_thread(
         persist_worker_token_usage,
         terminal_id=terminal_id,

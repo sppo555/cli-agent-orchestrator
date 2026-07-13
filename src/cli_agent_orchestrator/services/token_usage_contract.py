@@ -1,8 +1,8 @@
 """Provider token-usage inventory and the pre-adapter extraction contract.
 
-This module intentionally contains no provider parser. The shared worker path
-remains estimate-only until a provider has evidence approved for the native
-adapter patch.
+This module intentionally contains no provider parser. The interactive worker
+path remains estimate-only; the explicit structured worker dispatches only
+providers with an evidence-approved native adapter.
 """
 
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ class UsageSource(str, Enum):
 
 
 class NativeUsage(BaseModel):
-    """Validated result an evidence-approved adapter may return later."""
+    """Validated result returned by an evidence-approved adapter."""
 
     model_config = ConfigDict(frozen=True)
 

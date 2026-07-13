@@ -307,6 +307,26 @@ class ClaudeCodeProvider(BaseProvider):
         )
         return f"{unset_cmd}; {claude_cmd}"
 
+    def build_structured_command(self) -> list[str]:
+        """Build the non-interactive Claude JSON command.
+
+        The interactive command builder remains the source of profile,
+        permission, MCP, and system-prompt wiring. Only the launch contract is
+        changed here: print mode plus machine-readable JSON output.
+        """
+        shell_command = self._build_claude_command()
+        _, separator, claude_command = shell_command.partition("; ")
+        if not separator or not claude_command.startswith("claude"):
+            raise ProviderError("failed to build structured Claude command")
+        command_parts = shlex.split(claude_command)
+        return [
+            command_parts[0],
+            "-p",
+            *command_parts[1:],
+            "--output-format",
+            "json",
+        ]
+
     @staticmethod
     def _ensure_skip_bypass_prompt_setting() -> None:
         """Ensure ``skipDangerousModePermissionPrompt`` is set in settings.

@@ -4,6 +4,7 @@ import pytest
 
 from cli_agent_orchestrator.services.token_usage_adapters import (
     extract_claude_code_usage,
+    extract_claude_code_last_message,
     extract_codex_usage,
     extract_codex_last_message,
     extract_native_usage,
@@ -21,6 +22,14 @@ def test_claude_fixture_extracts_final_native_usage():
     assert usage.input_tokens == 120
     assert usage.output_tokens == 30
     assert usage.total_tokens == 150
+
+
+def test_claude_structured_parser_extracts_result_message():
+    raw = (
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}\n'
+        '{"type":"result","result":"final answer"}\n'
+    )
+    assert extract_claude_code_last_message(raw) == "final answer"
 
 
 def test_codex_fixture_extracts_turn_usage_without_parsing_cached_subfield():

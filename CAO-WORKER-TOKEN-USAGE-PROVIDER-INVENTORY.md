@@ -1,25 +1,27 @@
-# CAO Worker Token Usage — Provider Inventory (4.17.3)
+# CAO Worker Token Usage — Provider Inventory (4.17.5)
 
 - Reviewed: 2026-07-13
-- Scope: evidence inventory and usage-source contract only
-- Runtime status: Claude Code and Codex have strict structured-event adapters; all other providers remain estimated
+- Scope: evidence inventory and structured-worker usage-source contract
+- Runtime status: interactive remains estimate-only; Claude Code and Codex have
+  strict structured-worker adapters; all other providers remain estimated
 - Native/provider-reported coverage: 2/9
 
 ## Evidence boundary
 
-This inventory is based on the repository's current provider manager and the
-common `run_agent_step()` completion seam. The current flow captures a final
-terminal message and estimates `ceil(text_length / 4)`; it does not consume a
-provider usage event, structured response, local usage log, or billing API.
+This inventory distinguishes the existing interactive `run_agent_step()`
+completion seam from the explicit structured worker mode. Interactive captures
+a final terminal message and estimates `ceil(text_length / 4)`; it does not
+consume a provider usage event, local usage log, or billing API. Structured
+mode consumes only the provider's machine-readable stdout.
 
 No provider is marked native from a CLI name, a screen string, a model name, or
 an arbitrary number in ordinary response text. A native adapter requires a
 sanitized fixture, provenance/version, field semantics, and a reviewed privacy
-boundary in 4.17.4.
+boundary in 4.17.5.
 
 ## Nine-provider inventory
 
-| Provider | Machine-readable usage in current CAO path | Usage source | Field semantics | Fixture provenance | Parser failure/fallback | Privacy boundary |
+| Provider | Machine-readable usage in structured mode | Usage source | Field semantics | Fixture provenance | Parser failure/fallback | Privacy boundary |
 |---|---|---|---|---|---|---|
 | `kiro_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `claude_code` | Yes | Structured JSON/JSONL result or assistant usage event | Non-negative input/output; total is input + output | Sanitized contract fixture in `test/services/fixtures/` | Return `None`; retain shared estimate | No prompt/response/transcript capture |
@@ -44,5 +46,6 @@ extract_usage(provider, execution_context, final_response) -> NativeUsage | None
 - `estimated` is provenance, not billing accuracy.
 
 The contract implementation lives in
-`src/cli_agent_orchestrator/services/token_usage_contract.py`; it intentionally
-returns `None` for every provider until Gate D approves a native adapter.
+`src/cli_agent_orchestrator/services/token_usage_contract.py`. The structured
+worker currently enables only Claude Code and Codex; interactive execution
+continues to use the estimate path for every provider.
