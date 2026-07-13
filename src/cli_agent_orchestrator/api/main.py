@@ -344,8 +344,7 @@ class RunStepRequest(BaseModel):
             or self.caller_id is not None
         ):
             raise ValueError(
-                "structured mode does not accept session_name, "
-                "reuse_terminal_id, or caller_id"
+                "structured mode does not accept session_name, " "reuse_terminal_id, or caller_id"
             )
         return self
 
@@ -1353,12 +1352,16 @@ def _token_usage_snapshot(value: Optional[str]) -> str:
     try:
         normalized = normalize_worker_token_usage_timestamp(value, "snapshot_at")
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     assert normalized is not None
     return normalized
 
 
-def _encode_token_usage_cursor(*, snapshot_at: str, recorded_at: str, record_id: str, fingerprint: str) -> str:
+def _encode_token_usage_cursor(
+    *, snapshot_at: str, recorded_at: str, record_id: str, fingerprint: str
+) -> str:
     payload = {
         "version": _TOKEN_USAGE_CURSOR_VERSION,
         "snapshot_at": snapshot_at,
@@ -1374,22 +1377,36 @@ def _decode_token_usage_cursor(cursor: str) -> Dict[str, str]:
     from cli_agent_orchestrator.clients.database import normalize_worker_token_usage_timestamp
 
     if not cursor or len(cursor) > 4096:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(base64.urlsafe_b64decode((cursor + padding).encode("ascii")))
     except (binascii.Error, ValueError, UnicodeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        ) from exc
     required = {"version", "snapshot_at", "recorded_at", "id", "fingerprint"}
-    if not isinstance(payload, dict) or set(payload) != required or payload.get("version") != _TOKEN_USAGE_CURSOR_VERSION:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != required
+        or payload.get("version") != _TOKEN_USAGE_CURSOR_VERSION
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
     if not all(isinstance(payload[key], str) and payload[key] for key in required - {"version"}):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
     try:
         snapshot_at = normalize_worker_token_usage_timestamp(payload["snapshot_at"], "snapshot_at")
         recorded_at = normalize_worker_token_usage_timestamp(payload["recorded_at"], "recorded_at")
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        ) from exc
     assert snapshot_at is not None and recorded_at is not None
     return {
         "snapshot_at": snapshot_at,
@@ -1405,7 +1422,9 @@ def _token_usage_filters_or_422(**kwargs: Any) -> Any:
     try:
         return build_worker_token_usage_filters(**kwargs)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @app.get("/token-usage/page", response_model=WorkerTokenUsagePage)
@@ -1439,7 +1458,9 @@ async def page_token_usage(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="cursor does not match filters",
             )
-        requested_snapshot = _token_usage_snapshot(snapshot_at) if snapshot_at else decoded["snapshot_at"]
+        requested_snapshot = (
+            _token_usage_snapshot(snapshot_at) if snapshot_at else decoded["snapshot_at"]
+        )
         if requested_snapshot != decoded["snapshot_at"]:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
