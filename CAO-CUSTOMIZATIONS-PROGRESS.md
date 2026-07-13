@@ -31,7 +31,7 @@
 | 4.13 Worker init headless render-viewer | `custom/4.13-worker-init-headless-viewer` | `deebf65` | `c63ba38` | Done; viewer sizing is session-scoped |
 | 4.14 Worker init status recovery from UNKNOWN | `custom/4.14-worker-init-status-recovery` | `custom/4.6-status-turn-boundary` | `0bfb7d7` | Done |
 | 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
-| 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | current owner HEAD | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
+| 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | `12a8af9` | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
 | Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
 
 ## 2026-07-12 Sync Record
@@ -209,6 +209,7 @@
 - 4.17.3/4.17.4 added the nine-provider evidence inventory and strict Claude Code/Codex structured adapters. Native usage is sourced only from provider-owned structured stdout; interactive remains estimate-only.
 - 4.17.5 F1 added an owner-only fsynced metadata spool with idempotent replay, quarantine, metrics, concurrent writer/flusher protection, and no prompt/response/session-log data.
 - 4.17.5 F2 added validated custom dates, safe local artifact links, UTF-8 CSV export with formula mitigation, provenance split, attempt drill-down, and migration/API/no-data guidance. Changes remain token-specific and do not re-enter `App.tsx` state.
+- Baseline evidence: on pre-4.17 commit `323ffcf` (before the token successor series), `test/mcp_server/test_workflow_tools.py::TestWorkflowCancel::test_success_envelope` reproduced the same `300.0 != MCP_REQUEST_TIMEOUT (30)` failure. The failure is unrelated to the token changes.
 
 ## Validation
 
