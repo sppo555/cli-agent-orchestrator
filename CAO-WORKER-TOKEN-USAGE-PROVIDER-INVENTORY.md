@@ -49,3 +49,15 @@ The contract implementation lives in
 `src/cli_agent_orchestrator/services/token_usage_contract.py`. The structured
 worker currently enables only Claude Code and Codex; interactive execution
 continues to use the estimate path for every provider.
+
+## Durable write recovery
+
+SQLite is the primary sink. If a completed worker record cannot be written,
+the same metadata-only record is appended to the owner-only
+`token-usage-spool/pending.jsonl` file and fsynced. A background flusher replays
+complete records with the original record id and timestamp; SQLite ignores a
+duplicate record id after a crash between commit and spool acknowledgement.
+Malformed or unknown-version records are quarantined, incomplete tails remain
+visible, and the worker completion path is never failed by usage persistence.
+The spool contains no prompt, response, transcript, session log, or raw provider
+output.

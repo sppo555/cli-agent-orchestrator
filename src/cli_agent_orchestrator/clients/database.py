@@ -564,17 +564,24 @@ def record_worker_token_usage(
     run_id: Optional[str] = None,
     step_id: Optional[str] = None,
     progress: Optional[str] = None,
+    record_id: Optional[str] = None,
+    recorded_at: Optional[str] = None,
 ) -> str:
-    """Persist one completed worker attempt and return its record id."""
+    """Persist one completed worker attempt and return its id.
+
+    The optional replay fields support durable spool recovery. INSERT OR
+    IGNORE makes replay idempotent after a crash between SQLite commit and
+    spool acknowledgement.
+    """
     import sqlite3
 
     from cli_agent_orchestrator.constants import DATABASE_FILE
 
-    record_id = str(uuid.uuid4())
-    recorded_at = datetime.now(timezone.utc).isoformat()
+    record_id = record_id or str(uuid.uuid4())
+    recorded_at = recorded_at or datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(str(DATABASE_FILE)) as conn:
         conn.execute(
-            "INSERT INTO worker_token_usage ("
+            "INSERT OR IGNORE INTO worker_token_usage ("
             "id, terminal_id, provider, agent, run_id, step_id, model, effort, "
             "progress, input_tokens, output_tokens, total_tokens, estimated, recorded_at"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

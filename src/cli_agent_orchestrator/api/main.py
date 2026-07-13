@@ -180,6 +180,22 @@ async def inbox_reconciliation_daemon(registry: PluginRegistry) -> None:
             logger.exception("Inbox reconciliation daemon error")
 
 
+async def token_usage_spool_daemon() -> None:
+    """Retry durable token-usage records while the server remains alive."""
+
+    logger.info("Token usage spool flusher started")
+    while True:
+        try:
+            from cli_agent_orchestrator.services.token_usage_spool import (
+                flush_token_usage_spool,
+            )
+
+            await asyncio.to_thread(flush_token_usage_spool)
+        except Exception:
+            logger.exception("Token usage spool flush error")
+        await asyncio.sleep(15)
+
+
 # Response Models
 class TerminalOutputResponse(BaseModel):
     output: str
@@ -458,6 +474,7 @@ async def lifespan(app: FastAPI):
     registry = PluginRegistry()
     await registry.load()
     app.state.plugin_registry = registry
+    token_usage_spool_task = asyncio.create_task(token_usage_spool_daemon())
 
     # Run cleanup in background
     asyncio.create_task(asyncio.to_thread(cleanup_old_data))
@@ -521,6 +538,7 @@ async def lifespan(app: FastAPI):
     inbox_service_task.cancel()
     # Cancel daemon on shutdown
     daemon_task.cancel()
+    token_usage_spool_task.cancel()
 
     try:
         await asyncio.gather(
@@ -528,6 +546,7 @@ async def lifespan(app: FastAPI):
             log_writer_task,
             inbox_service_task,
             daemon_task,
+            token_usage_spool_task,
             return_exceptions=True,
         )
     except asyncio.CancelledError:

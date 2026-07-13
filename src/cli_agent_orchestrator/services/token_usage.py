@@ -108,7 +108,31 @@ def persist_worker_token_usage(
     step_id: Optional[str] = None,
     progress: Optional[str] = None,
 ) -> None:
-    """Persist one completed worker attempt without allowing DB issues to fail it."""
+    """Persist one completed worker attempt without failing the worker.
+
+    SQLite remains the primary store. If it is unavailable, the same
+    metadata-only record is durably appended to the token-usage spool for
+    replay; prompt, response, and provider transcript data never enter it.
+    """
+
+    from cli_agent_orchestrator.services.token_usage_spool import (
+        append_token_usage_spool,
+        build_spool_payload,
+    )
+
+    try:
+        payload = build_spool_payload(
+            terminal_id=terminal_id,
+            provider=provider,
+            agent=agent,
+            usage=usage,
+            run_id=run_id,
+            step_id=step_id,
+            progress=progress,
+        )
+    except Exception as exc:  # noqa: BLE001 — fallback metadata must not break completion
+        logger.warning("Failed to build token usage spool payload for worker %s: %s", terminal_id, exc)
+        return
 
     try:
         from cli_agent_orchestrator.clients.database import record_worker_token_usage
@@ -121,6 +145,16 @@ def persist_worker_token_usage(
             step_id=step_id,
             usage=usage,
             progress=progress,
+            record_id=payload.record_id,
+            recorded_at=payload.recorded_at,
         )
     except Exception as exc:  # noqa: BLE001 — observability must not break worker completion
-        logger.warning("Failed to persist token usage for worker %s: %s", terminal_id, exc)
+        logger.warning(
+            "Failed to persist token usage for worker %s; queueing durable fallback: %s",
+            terminal_id,
+            exc,
+        )
+        try:
+            append_token_usage_spool(payload)
+        except Exception as spool_exc:  # noqa: BLE001 — worker completion remains primary
+            logger.warning("Failed to spool token usage for worker %s: %s", terminal_id, spool_exc)
