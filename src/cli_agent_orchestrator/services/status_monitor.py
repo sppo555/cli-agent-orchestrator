@@ -234,6 +234,7 @@ class StatusMonitor:
         # re-enter StatusMonitor while the latch state is mid-update.
         bus.publish(f"terminal.{terminal_id}.status", {"status": detected.value})
         logger.info(f"Terminal {terminal_id} status changed: {detected.value}")
+        self._schedule_native_usage_capture(terminal_id, detected)
 
     # ----- pyte rendered-screen detection (edge-debounced) -------------------
 
@@ -441,6 +442,49 @@ class StatusMonitor:
         self._detect_tasks.add(task)
         task.add_done_callback(self._detect_tasks.discard)
 
+    def _schedule_native_usage_capture(
+        self,
+        terminal_id: str,
+        detected: TerminalStatus,
+    ) -> None:
+        """Persist provider-log usage after a real interactive turn settles."""
+
+        from cli_agent_orchestrator.services.interactive_token_usage import (
+            cancel_interactive_usage_turn,
+            claim_completed_interactive_usage_turn,
+            complete_interactive_usage_turn,
+        )
+
+        if detected == TerminalStatus.ERROR:
+            cancel_interactive_usage_turn(terminal_id)
+            return
+        if detected not in {TerminalStatus.IDLE, TerminalStatus.COMPLETED}:
+            return
+
+        turn = claim_completed_interactive_usage_turn(terminal_id)
+        if turn is None:
+            return
+        loop = self._loop or self._running_loop()
+        if loop is None:
+            complete_interactive_usage_turn(turn)
+            return
+
+        def _spawn() -> None:
+            self._spawn_tracked(loop, asyncio.to_thread(complete_interactive_usage_turn, turn))
+
+        try:
+            if asyncio.get_running_loop() is loop:
+                _spawn()
+            else:
+                loop.call_soon_threadsafe(_spawn)
+        except RuntimeError:
+            try:
+                loop.call_soon_threadsafe(_spawn)
+            except RuntimeError:
+                # Server shutdown raced the completion edge. Persistence is
+                # best-effort and must not change terminal status semantics.
+                pass
+
     @staticmethod
     def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
         try:
@@ -527,6 +571,11 @@ class StatusMonitor:
             self._bursting.pop(terminal_id, None)
             handle = self._quiesce_handle.pop(terminal_id, None)
         self._cancel_quiesce_handle(handle)
+        from cli_agent_orchestrator.services.interactive_token_usage import (
+            clear_interactive_usage_terminal,
+        )
+
+        clear_interactive_usage_terminal(terminal_id)
 
     def reset_buffer(self, terminal_id: str) -> None:
         """Clear the rolling buffer + last-known status WITHOUT forgetting the
@@ -626,6 +675,7 @@ class StatusMonitor:
                     self._allow_processing_revert[terminal_id] = False
                     self._input_sent_at.pop(terminal_id, None)
                     self._input_sent_buffer_len.pop(terminal_id, None)
+                self._schedule_native_usage_capture(terminal_id, fresh)
                 return fresh
             return TerminalStatus.PROCESSING
 

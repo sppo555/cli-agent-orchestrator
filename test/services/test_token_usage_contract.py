@@ -17,13 +17,19 @@ from cli_agent_orchestrator.services.token_usage_contract import (
 
 
 def test_inventory_has_one_schema_complete_row_for_each_provider():
-    assert {entry.provider for entry in PROVIDER_USAGE_INVENTORY} == {provider.value for provider in ProviderType}
+    assert {entry.provider for entry in PROVIDER_USAGE_INVENTORY} == {
+        provider.value for provider in ProviderType
+    }
     validate_provider_usage_inventory()
-    assert {entry.provider for entry in PROVIDER_USAGE_INVENTORY if entry.machine_readable_usage} == {
+    assert {
+        entry.provider for entry in PROVIDER_USAGE_INVENTORY if entry.machine_readable_usage
+    } == {
         ProviderType.CLAUDE_CODE.value,
         ProviderType.CODEX.value,
     }
-    document = (Path(__file__).parents[2] / "CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md").read_text()
+    document = (
+        Path(__file__).parents[2] / "CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md"
+    ).read_text()
     assert all(f"| `{provider.value}` |" in document for provider in ProviderType)
     assert "待确认" not in document
 

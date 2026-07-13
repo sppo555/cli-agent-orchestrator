@@ -55,22 +55,36 @@ PROVIDER_USAGE_INVENTORY: tuple[ProviderUsageInventory, ...] = tuple(
         provider=provider.value,
         machine_readable_usage=provider.value in _NATIVE_PROVIDERS,
         usage_source=(
-            "Structured JSON/JSONL turn usage event."
-            if provider.value in _NATIVE_PROVIDERS
-            else "No native usage source approved."
+            "Structured JSON plus deterministic interactive session JSONL."
+            if provider is ProviderType.CLAUDE_CODE
+            else (
+                "Structured JSONL plus the rollout opened by the interactive Codex process."
+                if provider is ProviderType.CODEX
+                else "No native usage source approved."
+            )
         ),
         field_semantics=(
-            "Non-negative input_tokens/output_tokens; total is input plus output."
-            if provider.value in _NATIVE_PROVIDERS
-            else "Input/output/total/cache/reasoning semantics are unavailable."
+            "Input includes uncached, cache-creation, and cache-read tokens; total adds output."
+            if provider is ProviderType.CLAUDE_CODE
+            else (
+                "Provider input includes cached input; cumulative turn delta plus output."
+                if provider is ProviderType.CODEX
+                else "Input/output/total/cache/reasoning semantics are unavailable."
+            )
         ),
         fixture_provenance=(
-            "Sanitized contract fixture in test/services/fixtures; no prompt or transcript."
+            "Sanitized structured fixture plus metadata-only interactive unit fixtures."
             if provider.value in _NATIVE_PROVIDERS
             else "No sanitized usage fixture; adapter not approved."
         ),
-        fallback_behavior="Return None and keep the shared 4-chars-per-token estimate.",
-        privacy_boundary="Do not add a parser that captures prompt, response, or transcript text.",
+        fallback_behavior=(
+            "Omit native interactive records when exact provider evidence is unavailable."
+            if provider.value in _NATIVE_PROVIDERS
+            else "Return None and keep the shared 4-chars-per-token estimate where supported."
+        ),
+        privacy_boundary=(
+            "Read usage metadata only; never persist prompt, response, transcript, or source path."
+        ),
     )
     for provider in ProviderType
 )

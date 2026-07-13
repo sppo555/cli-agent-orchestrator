@@ -775,6 +775,80 @@ class TestSendInput:
         )
         mock_update.assert_called_once_with("test1234")
 
+    @patch(
+        "cli_agent_orchestrator.services.interactive_token_usage.begin_interactive_usage_turn",
+        return_value=True,
+    )
+    @patch("cli_agent_orchestrator.services.terminal_service.update_last_active")
+    @patch("cli_agent_orchestrator.services.terminal_service.provider_manager")
+    @patch("cli_agent_orchestrator.backends.registry._backend")
+    @patch("cli_agent_orchestrator.services.terminal_service.get_terminal_metadata")
+    def test_send_input_starts_native_usage_before_interactive_submission(
+        self,
+        mock_get_metadata,
+        mock_tmux,
+        mock_pm,
+        _mock_update,
+        begin_usage,
+    ):
+        mock_get_metadata.return_value = {
+            "tmux_session": "cao-session",
+            "tmux_window": "developer-codex",
+            "provider": "codex",
+            "agent_profile": "developer_codex",
+        }
+        provider = mock_pm.get_provider.return_value
+        provider.paste_enter_count = 1
+        provider.paste_submit_delay = 0.3
+        order = []
+        begin_usage.side_effect = lambda **_kwargs: order.append("begin") or True
+        mock_tmux.send_keys.side_effect = lambda *_args, **_kwargs: order.append("send")
+
+        assert send_input("test1234", "native task") is True
+
+        begin_usage.assert_called_once_with(
+            terminal_id="test1234",
+            provider="codex",
+            agent="developer_codex",
+            session_name="cao-session",
+            window_name="developer-codex",
+            prompt="native task",
+        )
+        assert order == ["begin", "send"]
+        mock_tmux.send_keys.assert_called_once()
+
+    @patch("cli_agent_orchestrator.services.interactive_token_usage.cancel_interactive_usage_turn")
+    @patch(
+        "cli_agent_orchestrator.services.interactive_token_usage.begin_interactive_usage_turn",
+        return_value=True,
+    )
+    @patch("cli_agent_orchestrator.services.terminal_service.provider_manager")
+    @patch("cli_agent_orchestrator.backends.registry._backend")
+    @patch("cli_agent_orchestrator.services.terminal_service.get_terminal_metadata")
+    def test_send_failure_cancels_native_usage_marker(
+        self,
+        mock_get_metadata,
+        mock_tmux,
+        mock_pm,
+        _begin_usage,
+        cancel_usage,
+    ):
+        mock_get_metadata.return_value = {
+            "tmux_session": "cao-session",
+            "tmux_window": "developer-codex",
+            "provider": "codex",
+            "agent_profile": "developer_codex",
+        }
+        provider = mock_pm.get_provider.return_value
+        provider.paste_enter_count = 1
+        provider.paste_submit_delay = 0.3
+        mock_tmux.send_keys.side_effect = RuntimeError("send failed")
+
+        with pytest.raises(RuntimeError, match="send failed"):
+            send_input("test1234", "native task")
+
+        cancel_usage.assert_called_once_with("test1234")
+
     @patch("cli_agent_orchestrator.services.terminal_service.status_monitor")
     @patch("cli_agent_orchestrator.services.terminal_service.update_last_active")
     @patch("cli_agent_orchestrator.services.terminal_service.provider_manager")

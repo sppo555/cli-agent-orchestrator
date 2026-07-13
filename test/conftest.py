@@ -1,5 +1,7 @@
 """Repo-wide test fixtures."""
 
+from unittest.mock import patch
+
 import pytest
 
 
@@ -14,3 +16,11 @@ def _no_llm_compile_in_tests(monkeypatch):
     var themselves or stub the ``wiki_compiler`` seams.
     """
     monkeypatch.setenv("CAO_MEMORY_COMPILE_MODE", "append")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_step_usage_persistence():
+    """Never let synthetic agent-step attempts write to the user's live DB."""
+
+    with patch("cli_agent_orchestrator.services.agent_step.persist_worker_token_usage"):
+        yield

@@ -13,6 +13,7 @@ from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import CAO_HOME_DIR
 from cli_agent_orchestrator.models.terminal import TerminalStatus
 from cli_agent_orchestrator.providers.base import BaseProvider
+from cli_agent_orchestrator.services.interactive_token_usage import claude_usage_session_id
 from cli_agent_orchestrator.services.settings_service import get_server_settings
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
 from cli_agent_orchestrator.utils.mcp_resolution import resolve_mcp_server_config
@@ -207,6 +208,16 @@ class ClaudeCodeProvider(BaseProvider):
             command_parts = ["claude"]
         else:
             command_parts = ["claude", "--dangerously-skip-permissions"]
+
+        # Give every CAO terminal a deterministic Claude session UUID.  The
+        # interactive token tracker can then bind this exact worker to its
+        # provider-owned JSONL usage log even when several workers share a cwd.
+        command_parts.extend(
+            [
+                "--session-id",
+                claude_usage_session_id(self.terminal_id, self.session_name, self.window_name),
+            ]
+        )
 
         # Route based on profile state
         native = getattr(profile, "native_agent", None) if profile else None

@@ -40,6 +40,7 @@ def _payload(*, record_id="record-1", estimated=True):
 @pytest.fixture
 def spool_home(tmp_path, monkeypatch):
     monkeypatch.setattr("cli_agent_orchestrator.constants.CAO_HOME_DIR", tmp_path)
+    monkeypatch.setattr("cli_agent_orchestrator.constants.DATABASE_FILE", tmp_path / "usage.db")
     return tmp_path
 
 
@@ -54,9 +55,7 @@ def test_payload_is_metadata_only_and_rejects_transcript_fields():
             {**payload.model_dump(), "prompt": "do not store this"}
         )
     with pytest.raises(ValueError):
-        spool.TokenUsageSpoolPayload.model_validate(
-            {**payload.model_dump(), "input_tokens": "10"}
-        )
+        spool.TokenUsageSpoolPayload.model_validate({**payload.model_dump(), "input_tokens": "10"})
 
 
 def test_append_fsyncs_owner_only_spool_and_exposes_metrics(spool_home):
@@ -116,7 +115,10 @@ def test_reload_and_replay_simulates_restart_without_duplicate_row(spool_home, m
     import importlib
     import sqlite3
 
-    from cli_agent_orchestrator.clients.database import _migrate_worker_token_usage, list_worker_token_usage
+    from cli_agent_orchestrator.clients.database import (
+        _migrate_worker_token_usage,
+        list_worker_token_usage,
+    )
 
     db_file = spool_home / "restart.db"
     monkeypatch.setattr("cli_agent_orchestrator.constants.DATABASE_FILE", db_file)
@@ -127,7 +129,9 @@ def test_reload_and_replay_simulates_restart_without_duplicate_row(spool_home, m
     assert first.flushed == 1
 
     reloaded = importlib.reload(spool)
-    restarted_payload = reloaded.TokenUsageSpoolPayload.model_validate_json(payload.model_dump_json())
+    restarted_payload = reloaded.TokenUsageSpoolPayload.model_validate_json(
+        payload.model_dump_json()
+    )
     reloaded.append_token_usage_spool(restarted_payload)
     second = reloaded.flush_token_usage_spool()
     assert second.flushed == 1
@@ -173,10 +177,7 @@ def test_unknown_version_is_quarantined_without_blocking_following_item(spool_ho
     unknown = {**_payload().model_dump(), "version": 99}
     pending.write_bytes(
         (
-            json.dumps(unknown)
-            + "\n"
-            + _payload(record_id="record-2").model_dump_json()
-            + "\n"
+            json.dumps(unknown) + "\n" + _payload(record_id="record-2").model_dump_json() + "\n"
         ).encode()
     )
 
@@ -228,7 +229,9 @@ def test_partial_os_write_leaves_visible_tail_instead_of_silent_loss(spool_home)
 
 def test_utf8_metadata_is_replayed_without_line_corruption(spool_home):
     payload = _payload()
-    payload = payload.model_copy(update={"agent": "審查者", "progress": ".cao/worker-results/結果.md"})
+    payload = payload.model_copy(
+        update={"agent": "審查者", "progress": ".cao/worker-results/結果.md"}
+    )
     spool.append_token_usage_spool(payload)
     with patch("cli_agent_orchestrator.clients.database.record_worker_token_usage") as record:
         result = spool.flush_token_usage_spool()
@@ -248,7 +251,10 @@ def test_concurrent_writer_and_flusher_do_not_lose_or_overwrite_items(spool_home
         entered_db.set()
         assert release_db.wait(timeout=2)
 
-    with patch("cli_agent_orchestrator.clients.database.record_worker_token_usage", side_effect=record_slowly):
+    with patch(
+        "cli_agent_orchestrator.clients.database.record_worker_token_usage",
+        side_effect=record_slowly,
+    ):
         with ThreadPoolExecutor(max_workers=2) as pool:
             flush_future = pool.submit(spool.flush_token_usage_spool)
             assert entered_db.wait(timeout=2)
@@ -276,7 +282,13 @@ def test_fsync_failure_keeps_written_item_visible(spool_home):
 
 
 def test_file_write_failure_does_not_fail_worker_completion(spool_home):
-    with patch.object(spool, "append_token_usage_spool", side_effect=PermissionError("read-only")):
+    with (
+        patch(
+            "cli_agent_orchestrator.clients.database.record_worker_token_usage",
+            side_effect=OSError("sqlite unavailable"),
+        ),
+        patch.object(spool, "append_token_usage_spool", side_effect=PermissionError("read-only")),
+    ):
         persist_worker_token_usage(
             terminal_id="abc12345",
             provider="codex",

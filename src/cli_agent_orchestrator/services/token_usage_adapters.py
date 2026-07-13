@@ -49,7 +49,10 @@ def _native_usage(value: Any) -> Optional[NativeUsage]:
     if any(key not in value for key in required):
         return None
     counts = {key: value[key] for key in required}
-    if any(isinstance(number, bool) or not isinstance(number, int) or number < 0 for number in counts.values()):
+    if any(
+        isinstance(number, bool) or not isinstance(number, int) or number < 0
+        for number in counts.values()
+    ):
         return None
     total = value.get("total_tokens", counts["input_tokens"] + counts["output_tokens"])
     if isinstance(total, bool) or not isinstance(total, int) or total < 0:
@@ -66,7 +69,12 @@ def _native_usage(value: Any) -> Optional[NativeUsage]:
 
 
 def extract_claude_code_usage(raw_output: Any) -> Optional[NativeUsage]:
-    """Extract the last valid Claude result/assistant usage object."""
+    """Extract the last valid Claude result/assistant usage object.
+
+    Claude reports uncached, cache-creation, and cache-read input separately.
+    All three are provider-processed input tokens; omitting the cache fields can
+    turn a real 190k-token turn into a misleading ``input_tokens=2`` record.
+    """
 
     found: Optional[NativeUsage] = None
     for event in _json_objects(raw_output):
@@ -80,7 +88,26 @@ def extract_claude_code_usage(raw_output: Any) -> Optional[NativeUsage]:
             if isinstance(message.get("model"), str):
                 candidates.append({**(message.get("usage") or {}), "model": message["model"]})
         for candidate in candidates:
-            usage = _native_usage(candidate)
+            normalized = candidate
+            if isinstance(candidate, Mapping):
+                uncached = candidate.get("input_tokens")
+                cache_creation = candidate.get("cache_creation_input_tokens", 0)
+                cache_read = candidate.get("cache_read_input_tokens", 0)
+                if all(
+                    isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                    for value in (uncached, cache_creation, cache_read)
+                ):
+                    normalized = {
+                        **candidate,
+                        "input_tokens": uncached + cache_creation + cache_read,
+                    }
+                    # Claude's result object may omit total_tokens or define it
+                    # without cache input. Recompute against the normalized
+                    # input/output contract used by the dashboard.
+                    output = candidate.get("output_tokens")
+                    if isinstance(output, int) and not isinstance(output, bool) and output >= 0:
+                        normalized["total_tokens"] = normalized["input_tokens"] + output
+            usage = _native_usage(normalized)
             if usage is not None:
                 found = usage
     return found

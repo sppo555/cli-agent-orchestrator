@@ -1106,6 +1106,8 @@ class TestClaudeCodeProviderMisc:
         command = provider._build_claude_command()
 
         assert "claude --dangerously-skip-permissions" in command
+        assert "--session-id" in command
+        assert provider._build_claude_command() == command
         assert "--permission-mode" not in command
 
     def test_build_structured_command_uses_print_json_without_changing_interactive_command(self):

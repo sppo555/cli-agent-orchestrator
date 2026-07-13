@@ -173,6 +173,15 @@ class TestGetStatusTmux:
         assert sm._last_status["t1"] == TerminalStatus.PROCESSING
         assert sm._allow_processing_revert["t1"] is False
 
+    def test_processing_to_completed_schedules_native_usage_capture(self):
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.PROCESSING
+        sm._schedule_native_usage_capture = MagicMock()
+
+        sm._apply_detection("t1", TerminalStatus.COMPLETED)
+
+        sm._schedule_native_usage_capture.assert_called_once_with("t1", TerminalStatus.COMPLETED)
+
 
 class TestGetStatusEventInbox:
     """Event-inbox backend (herdr): derive status on demand from the provider."""

@@ -232,7 +232,15 @@ async def run_agent_step(
     # key sends); run it off the event loop so a slow tmux call cannot freeze
     # the whole server for other requests (same hazard as issue #382, which was
     # only fixed for DELETE /sessions). Any failure raises and propagates.
-    await asyncio.to_thread(terminal_service.send_input, terminal_id, prompt)
+    # This seam persists its own estimate below (or callers use the explicit
+    # structured worker). Disable assign/interactive log capture here so one
+    # run-step cannot create both a native and an estimated record.
+    await asyncio.to_thread(
+        terminal_service.send_input,
+        terminal_id,
+        prompt,
+        track_token_usage=False,
+    )
 
     # Wait for completion — IN-PROCESS poll of status_monitor (NOT the
     # HTTP-polling wait_until_terminal_status, which would reintroduce the
@@ -280,7 +288,9 @@ async def run_agent_step(
     # belongs to the explicit structured worker mode, whose stdout is a
     # provider-owned JSON/JSONL contract. Terminal scrollback is deliberately
     # not a production usage source.
-    usage = estimate_token_usage(prompt, last_message, model=model, effort=effort, progress=progress)
+    usage = estimate_token_usage(
+        prompt, last_message, model=model, effort=effort, progress=progress
+    )
     result = AgentStepResult(
         terminal_id=terminal_id,
         last_message=last_message,

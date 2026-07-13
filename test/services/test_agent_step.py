@@ -95,7 +95,7 @@ class TestHappyPath:
         assert result.token_usage.estimated is True
         # Canonical sequence: created, prompt sent, output extracted in LAST mode.
         m_create.assert_awaited_once()
-        m_send.assert_called_once_with("abc12345", "do the task")
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
         m_out.assert_called_once_with("abc12345", OutputMode.LAST)
         # Created-here + teardown default -> graceful exit THEN delete.
         m_exit.assert_called_once_with("abc12345")
@@ -130,7 +130,7 @@ class TestHappyPath:
         m_delete.assert_not_called()
         # A reused terminal is owned by the caller — no graceful exit either.
         m_exit.assert_not_called()
-        m_send.assert_called_once_with("reuse99", "x")
+        m_send.assert_called_once_with("reuse99", "x", track_token_usage=False)
 
     def test_working_directory_forwarded_to_create(self):
         create, send, delete, get_output, exit_cli, wait, status = _patch_terminal_layer()

@@ -3,14 +3,13 @@ from pathlib import Path
 import pytest
 
 from cli_agent_orchestrator.services.token_usage_adapters import (
-    extract_claude_code_usage,
     extract_claude_code_last_message,
-    extract_codex_usage,
+    extract_claude_code_usage,
     extract_codex_last_message,
+    extract_codex_usage,
     extract_native_usage,
 )
 from cli_agent_orchestrator.services.token_usage_contract import UsageSource, extract_usage
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -22,6 +21,21 @@ def test_claude_fixture_extracts_final_native_usage():
     assert usage.input_tokens == 120
     assert usage.output_tokens == 30
     assert usage.total_tokens == 150
+
+
+def test_claude_native_usage_includes_cache_creation_and_read_input():
+    raw = (
+        '{"type":"result","usage":{"input_tokens":2,'
+        '"cache_creation_input_tokens":400,"cache_read_input_tokens":190000,'
+        '"output_tokens":30}}'
+    )
+
+    usage = extract_claude_code_usage(raw)
+
+    assert usage is not None
+    assert usage.input_tokens == 190402
+    assert usage.output_tokens == 30
+    assert usage.total_tokens == 190432
 
 
 def test_claude_structured_parser_extracts_result_message():
