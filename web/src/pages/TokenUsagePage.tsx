@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { tokenApi } from '../token-api'
 import { WorkerTokenUsageRecord, WorkerTokenUsageSummary } from '../token-types'
-import { displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, rangeBounds, toggleValue, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
-import { BarChart3, Check, ChevronDown, Clock3, Database, Filter, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
+import { displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, rangeBounds, recordsToCsv, safeArtifactHref, toggleValue, usageSplit, usageStatus, validateCustomRange, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
+import { BarChart3, Check, ChevronDown, ChevronRight, Clock3, Database, Download, FileText, Filter, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 
 function FilterGroup({
   title,
@@ -69,6 +69,12 @@ function StatCard({ label, value, detail, tone, icon }: { label: string; value: 
   )
 }
 
+function ProgressValue({ value }: { value: string | null }) {
+  const href = safeArtifactHref(value)
+  const label = getPathLabel(value)
+  return href ? <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-emerald-300 underline decoration-emerald-500/30 underline-offset-2 hover:text-emerald-200"><FileText size={12} />{label}</a> : <span className="truncate">{label}</span>
+}
+
 export function TokenUsagePage() {
   const [records, setRecords] = useState<WorkerTokenUsageRecord[]>([])
   const [summary, setSummary] = useState<WorkerTokenUsageSummary | null>(null)
@@ -82,18 +88,29 @@ export function TokenUsagePage() {
   const [range, setRange] = useState<RangeKey>('all')
   const [sort, setSort] = useState<SortKey>('latest')
   const [query, setQuery] = useState('')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [expandedAttempt, setExpandedAttempt] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(true)
   const requestSequence = useRef(0)
 
+  const customRangeError = range === 'custom' ? validateCustomRange(customFrom, customTo) : null
+
   const serverQuery = useMemo(() => ({
     ...filters,
-    ...rangeBounds(range),
-  }), [filters, range])
+    ...rangeBounds(range, new Date(), { from: customFrom, to: customTo }),
+  }), [customFrom, customTo, filters, range])
 
   const loadRecords = useCallback(async (isRefresh = false) => {
     const sequence = ++requestSequence.current
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
+    if (customRangeError) {
+      setError(customRangeError)
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
     try {
       const page = await tokenApi.listTokenUsagePage({ ...serverQuery, limit: 100 })
       const data = await tokenApi.summarizeTokenUsage({ ...serverQuery, snapshotAt: page.snapshot_at })
@@ -112,7 +129,7 @@ export function TokenUsagePage() {
         setRefreshing(false)
       }
     }
-  }, [serverQuery])
+  }, [customRangeError, serverQuery])
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || !snapshotAt || loadingMore) return
@@ -154,6 +171,7 @@ export function TokenUsagePage() {
 
   const usageByDay = useMemo<[string, number][]>(() => (summary?.daily || []).slice(-7).map(bucket => [bucket.value || '', bucket.total_tokens]), [summary])
   const usageByModel = useMemo<[string, number][]>(() => (summary?.by_model || []).slice(0, 5).map(bucket => [bucket.value || 'provider default', bucket.total_tokens]), [summary])
+  const provenance = useMemo(() => usageSplit(records), [records])
 
   const maxDay = Math.max(...usageByDay.map(([, value]) => value), 1)
   const maxModel = Math.max(...usageByModel.map(([, value]) => value), 1)
@@ -163,6 +181,27 @@ export function TokenUsagePage() {
     setFilters(EMPTY_FILTERS)
     setRange('all')
     setQuery('')
+    setCustomFrom('')
+    setCustomTo('')
+    setNextCursor(null)
+    setSnapshotAt(null)
+  }
+
+  const updateCustomDate = (field: 'from' | 'to', value: string) => {
+    if (field === 'from') setCustomFrom(value)
+    else setCustomTo(value)
+    setNextCursor(null)
+    setSnapshotAt(null)
+  }
+
+  const downloadCsv = () => {
+    const blob = new Blob([recordsToCsv(filteredRecords)], { type: 'text/csv;charset=utf-8' })
+    const href = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.download = 'token-usage.csv'
+    anchor.click()
+    URL.revokeObjectURL(href)
   }
 
   const toggleFilter = (key: FilterKey, value: string) => {
@@ -201,6 +240,15 @@ export function TokenUsagePage() {
         <StatCard label="Completed attempts" value={formatExact(summary?.attempts || 0)} detail={summary?.attempts ? `${formatTokens(Math.round(totals.total / summary.attempts))} average / attempt` : 'No records match'} tone="bg-amber-950/60" icon={<Clock3 size={18} className="text-amber-400" />} />
       </div>
 
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-800 bg-gray-900/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><h3 className="text-sm font-semibold text-white">Usage provenance</h3><p className="mt-1 text-xs text-gray-500">Loaded records split by provider-reported versus estimate status.</p></div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-md bg-emerald-950/60 px-2.5 py-1.5 text-emerald-300">Native {formatTokens(provenance.native)}</span>
+          <span className="rounded-md bg-amber-950/60 px-2.5 py-1.5 text-amber-300">Estimated {formatTokens(provenance.estimated)}</span>
+          <span className="rounded-md bg-gray-800 px-2.5 py-1.5 text-gray-400">Unknown {formatTokens(provenance.unknown)}</span>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-4 rounded-xl border border-gray-800 bg-gray-900/60 p-4 xl:flex-row">
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
           <Search size={16} className="shrink-0 text-gray-500" />
@@ -214,6 +262,8 @@ export function TokenUsagePage() {
               {key === 'all' ? 'All time' : key}
             </button>
           ))}
+          <button type="button" onClick={() => setRange('custom')} className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${range === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>Custom</button>
+          {range === 'custom' && <div className="flex items-center gap-2 text-xs text-gray-500"><label>From <input type="date" value={customFrom} onChange={event => updateCustomDate('from', event.target.value)} aria-label="Custom date from" className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300" /></label><label>To <input type="date" value={customTo} onChange={event => updateCustomDate('to', event.target.value)} aria-label="Custom date to" className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300" /></label></div>}
           <label className="ml-1 flex items-center gap-2 text-xs text-gray-500">
             Sort
             <select value={sort} onChange={event => setSort(event.target.value as SortKey)} className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300 outline-none">
@@ -221,6 +271,7 @@ export function TokenUsagePage() {
             </select>
           </label>
         </div>
+        {customRangeError && <p className="text-xs text-amber-300" role="alert">{customRangeError}</p>}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
@@ -264,9 +315,9 @@ export function TokenUsagePage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/60">
-            <div className="flex flex-col gap-2 border-b border-gray-800 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold text-white">Worker attempts</h3><p className="mt-1 text-xs text-gray-500">Each row is persisted before the worker terminal is torn down.</p></div><span className="text-xs text-gray-500">Showing {filteredRecords.length} loaded of {summary?.attempts || 0}</span></div>
+            <div className="flex flex-col gap-2 border-b border-gray-800 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold text-white">Worker attempts</h3><p className="mt-1 text-xs text-gray-500">Each row is persisted before the worker terminal is torn down.</p></div><div className="flex items-center gap-3"><span className="text-xs text-gray-500">Showing {filteredRecords.length} loaded of {summary?.attempts || 0}</span><button type="button" onClick={downloadCsv} disabled={!filteredRecords.length} className="inline-flex items-center gap-1.5 rounded-md border border-gray-700 px-2.5 py-1.5 text-xs text-gray-300 hover:border-emerald-500/60 hover:text-white disabled:opacity-40"><Download size={13} />CSV</button></div></div>
             {loading ? <div className="px-4 py-12 text-center text-sm text-gray-500">Loading token usage…</div> : filteredRecords.length === 0 ? <div className="px-4 py-12 text-center"><Database size={24} className="mx-auto text-gray-700" /><p className="mt-3 text-sm text-gray-400">{summary?.attempts ? 'No loaded records match this search.' : 'No worker usage records yet.'}</p><p className="mt-1 text-xs text-gray-600">{summary?.attempts ? 'Try clearing the search or loading another page.' : 'Complete a worker attempt after restarting the CAO server migration.'}</p></div> : (
-              <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead className="bg-gray-950/50 text-[10px] uppercase tracking-wider text-gray-500"><tr><th className="px-4 py-3 font-semibold">Recorded</th><th className="px-4 py-3 font-semibold">Progress</th><th className="px-4 py-3 font-semibold">Worker</th><th className="px-4 py-3 font-semibold">Model / effort</th><th className="px-4 py-3 text-right font-semibold">Tokens</th><th className="px-4 py-3 text-right font-semibold">In / out</th></tr></thead><tbody className="divide-y divide-gray-800/80">{filteredRecords.map(row => <tr key={row.id} className="transition hover:bg-gray-800/30"><td className="whitespace-nowrap px-4 py-3 align-top"><div className="text-xs text-gray-300">{displayDate(row.recorded_at)}</div><div className="mt-1 text-[10px] text-gray-600">{row.estimated ? 'estimated' : 'provider reported'}</div></td><td className="max-w-[300px] px-4 py-3 align-top"><div className="truncate text-xs text-emerald-300" title={row.progress || undefined}>{getPathLabel(row.progress)}</div>{row.step_id && <div className="mt-1 text-[10px] text-gray-600">step: {row.step_id}</div>}</td><td className="px-4 py-3 align-top"><div className="text-xs font-medium text-gray-300">{row.agent}</div><div className="mt-1 text-[10px] capitalize text-gray-600">{displayProvider(row.provider)}</div></td><td className="px-4 py-3 align-top"><div className="max-w-[180px] truncate text-xs text-gray-300" title={row.model || undefined}>{labelFor(row.model)}</div><div className="mt-1 text-[10px] text-gray-500">effort: {labelFor(row.effort)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-sm font-semibold text-white">{formatExact(row.total_tokens)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-xs text-gray-400">{formatExact(row.input_tokens)} / {formatExact(row.output_tokens)}</div></td></tr>)}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead className="bg-gray-950/50 text-[10px] uppercase tracking-wider text-gray-500"><tr><th className="px-4 py-3 font-semibold">Recorded</th><th className="px-4 py-3 font-semibold">Progress</th><th className="px-4 py-3 font-semibold">Worker</th><th className="px-4 py-3 font-semibold">Model / effort</th><th className="px-4 py-3 text-right font-semibold">Tokens</th><th className="px-4 py-3 text-right font-semibold">In / out</th></tr></thead><tbody className="divide-y divide-gray-800/80">{filteredRecords.map(row => { const isExpanded = expandedAttempt === row.id; return <Fragment key={row.id}><tr className="cursor-pointer transition hover:bg-gray-800/30" onClick={() => setExpandedAttempt(isExpanded ? null : row.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') setExpandedAttempt(isExpanded ? null : row.id) }} tabIndex={0}><td className="whitespace-nowrap px-4 py-3 align-top"><div className="flex items-center gap-1 text-xs text-gray-300">{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}{displayDate(row.recorded_at)}</div><div className="mt-1 text-[10px] text-gray-600">{usageStatus(row.estimated)}</div></td><td className="max-w-[300px] px-4 py-3 align-top"><div className="truncate text-xs text-emerald-300" title={row.progress || undefined}><ProgressValue value={row.progress} /></div>{row.step_id && <div className="mt-1 text-[10px] text-gray-600">step: {row.step_id}</div>}</td><td className="px-4 py-3 align-top"><div className="text-xs font-medium text-gray-300">{row.agent}</div><div className="mt-1 text-[10px] capitalize text-gray-600">{displayProvider(row.provider)}</div></td><td className="px-4 py-3 align-top"><div className="max-w-[180px] truncate text-xs text-gray-300" title={row.model || undefined}>{labelFor(row.model)}</div><div className="mt-1 text-[10px] text-gray-500">effort: {labelFor(row.effort)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-sm font-semibold text-white">{formatExact(row.total_tokens)}</div></td><td className="whitespace-nowrap px-4 py-3 text-right align-top"><div className="text-xs text-gray-400">{formatExact(row.input_tokens)} / {formatExact(row.output_tokens)}</div></td></tr>{isExpanded && <tr><td colSpan={6} className="bg-gray-950/40 px-6 py-4"><div className="grid gap-3 text-xs text-gray-400 sm:grid-cols-3"><div><span className="text-gray-600">Run</span><p className="mt-1 text-gray-300">{labelFor(row.run_id)}</p></div><div><span className="text-gray-600">Step</span><p className="mt-1 text-gray-300">{labelFor(row.step_id)}</p></div><div><span className="text-gray-600">Terminal</span><p className="mt-1 text-gray-300">{row.terminal_id}</p></div></div></td></tr>}</Fragment> })}</tbody></table></div>
             )}
             {!loading && nextCursor && <div className="border-t border-gray-800 px-4 py-4 text-center"><button type="button" onClick={loadMore} disabled={loadingMore} className="inline-flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-gray-300 transition hover:border-emerald-500/60 hover:text-white disabled:opacity-50"><RefreshCw size={14} className={loadingMore ? 'animate-spin' : ''} />{loadingMore ? 'Loading…' : 'Load more'}</button></div>}
           </div>

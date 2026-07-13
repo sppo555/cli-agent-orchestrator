@@ -7,8 +7,14 @@ import {
   getPathLabel,
   labelFor,
   modelStats,
+  rangeBounds,
+  recordsToCsv,
+  safeArtifactHref,
   sum,
   toggleValue,
+  usageSplit,
+  usageStatus,
+  validateCustomRange,
 } from '../pages/tokenUsage'
 import { WorkerTokenUsageRecord } from '../token-types'
 
@@ -66,5 +72,29 @@ describe('token usage view model helpers', () => {
       ['provider default', 500],
       ['opus', 500],
     ])
+  })
+
+  it('validates custom dates and uses local-day boundaries', () => {
+    expect(validateCustomRange('2026-07-13', '2026-07-12')).toContain('on or before')
+    expect(validateCustomRange('2026-07-13', '')).toContain('both')
+    const bounds = rangeBounds('custom', new Date('2026-07-13T12:00:00Z'), { from: '2026-07-12', to: '2026-07-13' })
+    expect(new Date(bounds.from!).getTime()).toBe(new Date('2026-07-12T00:00:00').getTime())
+    expect(new Date(bounds.to!).getTime()).toBe(new Date('2026-07-13T23:59:59.999').getTime())
+  })
+
+  it('exports quoted UTF-8 CSV and neutralizes formula cells', () => {
+    const csv = recordsToCsv([{ ...records[0], agent: '=SUM(A1)', progress: 'a,b\n第二行' }])
+    expect(csv.startsWith('\ufeffrecorded_at,provider')).toBe(true)
+    expect(csv).toContain("'=SUM(A1)")
+    expect(csv).toContain('"a,b\n第二行"')
+  })
+
+  it('only links safe local worker artifacts and splits provenance totals', () => {
+    expect(safeArtifactHref('.cao/worker-results/review.md')).toBe('.cao/worker-results/review.md')
+    expect(safeArtifactHref('https://example.com/result')).toBeNull()
+    expect(safeArtifactHref('.cao/worker-results/../secret')).toBeNull()
+    expect(usageSplit(records)).toEqual({ native: 500, estimated: 500, unknown: 0 })
+    expect(usageStatus(false)).toBe('native')
+    expect(usageStatus(undefined)).toBe('unknown')
   })
 })

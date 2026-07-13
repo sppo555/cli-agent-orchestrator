@@ -61,3 +61,9 @@ Malformed or unknown-version records are quarantined, incomplete tails remain
 visible, and the worker completion path is never failed by usage persistence.
 The spool contains no prompt, response, transcript, session log, or raw provider
 output.
+
+The token-specific page also keeps provenance visible in the UI, supports a
+validated custom date range, exports the current filtered rows as UTF-8 CSV
+with formula-cell mitigation, and only renders local worker-result paths as
+artifact links. Legacy nullable fields remain displayable as `Default` or
+`unknown`; no App-level state or interactive terminal flow is involved.

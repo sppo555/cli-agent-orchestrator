@@ -79,4 +79,17 @@ describe('TokenUsagePage', () => {
     await expect(tokenApi.listTokenUsage({ limit: 25 })).resolves.toEqual(records)
     expect(fetchMock).toHaveBeenCalledWith('/token-usage?limit=25', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
+
+  it('opens an attempt drill-down and exposes provenance split', async () => {
+    vi.spyOn(tokenApi, 'listTokenUsagePage').mockResolvedValue(page())
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary())
+    render(<TokenUsagePage />)
+
+    await waitFor(() => expect(screen.getByRole('link', { name: /review\.md/ })).toBeInTheDocument())
+    expect(screen.getByText('Native 0')).toBeInTheDocument()
+    expect(screen.getByText('Estimated 3.0K')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: /review\.md/ }))
+    expect(screen.getByText('run-1')).toBeInTheDocument()
+    expect(screen.getByText('term-1')).toBeInTheDocument()
+  })
 })

@@ -1,16 +1,37 @@
 import { WorkerTokenUsageRecord } from '../token-types'
 
 export type FilterKey = 'provider' | 'agent' | 'model' | 'effort'
-export type RangeKey = 'all' | '24h' | '7d' | '30d'
+export type RangeKey = 'all' | '24h' | '7d' | '30d' | 'custom'
 export type SortKey = 'latest' | 'total' | 'input' | 'output'
 export type TokenFilters = Record<FilterKey, string[]>
 
 export const EMPTY_FILTERS: TokenFilters = { provider: [], agent: [], model: [], effort: [] }
 
-export function rangeBounds(range: RangeKey, now = new Date()): { from?: string; to?: string } {
-  const durations: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000 }
+export function rangeBounds(
+  range: RangeKey,
+  now = new Date(),
+  custom: { from?: string; to?: string } = {},
+): { from?: string; to?: string } {
+  if (range === 'custom') {
+    const from = custom.from ? new Date(`${custom.from}T00:00:00`) : null
+    const to = custom.to ? new Date(`${custom.to}T23:59:59.999`) : null
+    return {
+      ...(from && !Number.isNaN(from.getTime()) ? { from: from.toISOString() } : {}),
+      ...(to && !Number.isNaN(to.getTime()) ? { to: to.toISOString() } : {}),
+    }
+  }
+  const durations: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000, custom: null }
   const duration = durations[range]
   return duration === null ? {} : { from: new Date(now.getTime() - duration).toISOString(), to: now.toISOString() }
+}
+
+export function validateCustomRange(from: string, to: string): string | null {
+  if (!from || !to) return 'Choose both a start and end date.'
+  const start = new Date(`${from}T00:00:00`)
+  const end = new Date(`${to}T23:59:59.999`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'Enter valid calendar dates.'
+  if (start.getTime() > end.getTime()) return 'Start date must be on or before end date.'
+  return null
 }
 
 export function formatTokens(value: number): string {
@@ -49,6 +70,44 @@ export function getPathLabel(value: string | null): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : value
 }
 
+export function safeArtifactHref(value: string | null): string | null {
+  if (!value || value.length > 512 || /[\u0000-\u001f\\?#]/.test(value)) return null
+  if (!value.startsWith('.cao/worker-results/')) return null
+  const parts = value.split('/')
+  if (parts.some(part => !part || part === '.' || part === '..')) return null
+  return value
+}
+
+function csvCell(value: string | number | boolean | null): string {
+  const text = value === null ? '' : String(value)
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text
+  return /[",\n\r]/.test(safeText) ? `"${safeText.replace(/"/g, '""')}"` : safeText
+}
+
+export function recordsToCsv(records: WorkerTokenUsageRecord[]): string {
+  const headers = ['recorded_at', 'provider', 'agent', 'run_id', 'step_id', 'progress', 'model', 'effort', 'input_tokens', 'output_tokens', 'total_tokens', 'estimated']
+  const rows = records.map(row => [
+    row.recorded_at, row.provider, row.agent, row.run_id, row.step_id, row.progress, row.model, row.effort,
+    row.input_tokens, row.output_tokens, row.total_tokens, row.estimated,
+  ].map(csvCell).join(','))
+  return `\ufeff${headers.join(',')}\n${rows.join('\n')}${rows.length ? '\n' : ''}`
+}
+
+export function usageSplit(records: WorkerTokenUsageRecord[]): { native: number; estimated: number; unknown: number } {
+  return records.reduce((split, row) => {
+    if (row.estimated === false) split.native += row.total_tokens
+    else if (row.estimated === true) split.estimated += row.total_tokens
+    else split.unknown += row.total_tokens
+    return split
+  }, { native: 0, estimated: 0, unknown: 0 })
+}
+
+export function usageStatus(value: boolean | null | undefined): 'native' | 'estimated' | 'unknown' {
+  if (value === false) return 'native'
+  if (value === true) return 'estimated'
+  return 'unknown'
+}
+
 export function sum(records: WorkerTokenUsageRecord[], key: 'input_tokens' | 'output_tokens' | 'total_tokens'): number {
   return records.reduce((total, row) => total + row[key], 0)
 }
@@ -65,7 +124,7 @@ export function filterAndSortRecords(
   sort: SortKey,
 ): WorkerTokenUsageRecord[] {
   const now = Date.now()
-  const rangeMs: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000 }
+  const rangeMs: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000, custom: null }
   const needle = query.trim().toLowerCase()
   return records.filter(row => {
     const date = new Date(row.recorded_at).getTime()
