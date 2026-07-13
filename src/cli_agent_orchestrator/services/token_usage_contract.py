@@ -48,13 +48,27 @@ class ProviderUsageInventory:
     privacy_boundary: str
 
 
+_NATIVE_PROVIDERS = {ProviderType.CLAUDE_CODE.value, ProviderType.CODEX.value}
+
 PROVIDER_USAGE_INVENTORY: tuple[ProviderUsageInventory, ...] = tuple(
     ProviderUsageInventory(
         provider=provider.value,
-        machine_readable_usage=False,
-        usage_source="No native usage source observed in the CAO provider/runtime path.",
-        field_semantics="Input/output/total/cache/reasoning semantics are unavailable.",
-        fixture_provenance="No sanitized usage fixture; no adapter evidence approved.",
+        machine_readable_usage=provider.value in _NATIVE_PROVIDERS,
+        usage_source=(
+            "Structured JSON/JSONL turn usage event."
+            if provider.value in _NATIVE_PROVIDERS
+            else "No native usage source approved."
+        ),
+        field_semantics=(
+            "Non-negative input_tokens/output_tokens; total is input plus output."
+            if provider.value in _NATIVE_PROVIDERS
+            else "Input/output/total/cache/reasoning semantics are unavailable."
+        ),
+        fixture_provenance=(
+            "Sanitized contract fixture in test/services/fixtures; no prompt or transcript."
+            if provider.value in _NATIVE_PROVIDERS
+            else "No sanitized usage fixture; adapter not approved."
+        ),
         fallback_behavior="Return None and keep the shared 4-chars-per-token estimate.",
         privacy_boundary="Do not add a parser that captures prompt, response, or transcript text.",
     )
@@ -91,13 +105,15 @@ def extract_usage(
 ) -> Optional[NativeUsage]:
     """Return native usage only when a later adapter has approved evidence.
 
-    4.17.3 deliberately returns ``None`` for every provider. Keeping this
-    stable seam lets 4.17.4 add adapters without changing worker completion or
-    allowing accidental numeric parsing from ordinary response text.
+    Only Claude Code and Codex have adapters in this patch. Keeping the seam
+    strict lets every missing or malformed event fall back without changing
+    worker completion or parsing ordinary response text.
     """
 
-    del provider, execution_context, final_response
-    return None
+    del final_response
+    from cli_agent_orchestrator.services.token_usage_adapters import extract_native_usage
+
+    return extract_native_usage(provider, execution_context)
 
 
 def usage_source_from_estimated(estimated: bool) -> UsageSource:

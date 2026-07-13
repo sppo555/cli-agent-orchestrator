@@ -2,8 +2,8 @@
 
 - Reviewed: 2026-07-13
 - Scope: evidence inventory and usage-source contract only
-- Runtime status: all nine registered providers continue to use the shared estimated path
-- Native/provider-reported coverage: 0/9
+- Runtime status: Claude Code and Codex have strict structured-event adapters; all other providers remain estimated
+- Native/provider-reported coverage: 2/9
 
 ## Evidence boundary
 
@@ -22,8 +22,8 @@ boundary in 4.17.4.
 | Provider | Machine-readable usage in current CAO path | Usage source | Field semantics | Fixture provenance | Parser failure/fallback | Privacy boundary |
 |---|---|---|---|---|---|---|
 | `kiro_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
-| `claude_code` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
-| `codex` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
+| `claude_code` | Yes | Structured JSON/JSONL result or assistant usage event | Non-negative input/output; total is input + output | Sanitized contract fixture in `test/services/fixtures/` | Return `None`; retain shared estimate | No prompt/response/transcript capture |
+| `codex` | Yes | JSONL `turn/completed` or `turn.completed` usage event | Non-negative input/output; total is input + output; cached field is not double-counted | Sanitized contract fixture in `test/services/fixtures/` | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `kimi_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `copilot_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `opencode_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
