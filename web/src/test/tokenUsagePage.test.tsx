@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api, WorkerTokenUsageRecord } from '../api'
-import { TokenUsagePanel } from '../components/TokenUsagePanel'
+import { tokenApi } from '../token-api'
+import { WorkerTokenUsageRecord } from '../token-types'
+import { TokenUsagePage } from '../pages/TokenUsagePage'
 
 const records: WorkerTokenUsageRecord[] = [
   {
@@ -16,12 +17,12 @@ const records: WorkerTokenUsageRecord[] = [
   },
 ]
 
-describe('TokenUsagePanel', () => {
+describe('TokenUsagePage', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('renders summary totals and worker progress', async () => {
-    vi.spyOn(api, 'listTokenUsage').mockResolvedValue(records)
-    render(<TokenUsagePanel />)
+    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue(records)
+    render(<TokenUsagePage />)
 
     await waitFor(() => expect(screen.getByText('2 attempts')).toBeInTheDocument())
     expect(screen.getByText('…/worker-results/review.md')).toBeInTheDocument()
@@ -29,8 +30,8 @@ describe('TokenUsagePanel', () => {
   })
 
   it('filters records by checked provider label', async () => {
-    vi.spyOn(api, 'listTokenUsage').mockResolvedValue(records)
-    render(<TokenUsagePanel />)
+    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue(records)
+    render(<TokenUsagePage />)
 
     await waitFor(() => expect(screen.getByLabelText('Provider: claude_code')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('Provider: claude_code'))
@@ -38,5 +39,25 @@ describe('TokenUsagePanel', () => {
     expect(screen.getByText('…/worker-results/review.md')).toBeInTheDocument()
     expect(screen.queryByText('…/worker-results/plan.md')).not.toBeInTheDocument()
     expect(screen.getByText('1 attempts')).toBeInTheDocument()
+  })
+
+  it('provides a link back to the dashboard', async () => {
+    vi.spyOn(tokenApi, 'listTokenUsage').mockResolvedValue([])
+    render(<TokenUsagePage />)
+
+    expect(screen.getByRole('link', { name: /back to dashboard/i })).toHaveAttribute('href', '/')
+  })
+
+  it('uses the durable token usage endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve(records),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(tokenApi.listTokenUsage({ limit: 25 })).resolves.toEqual(records)
+    expect(fetchMock).toHaveBeenCalledWith('/token-usage?limit=25', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 })

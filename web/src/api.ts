@@ -113,23 +113,6 @@ export interface MemoryDetail extends MemorySummary {
   content: string
 }
 
-export interface WorkerTokenUsageRecord {
-  id: string
-  terminal_id: string
-  provider: string
-  agent: string
-  run_id: string | null
-  step_id: string | null
-  model: string | null
-  effort: string | null
-  progress: string | null
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  estimated: boolean
-  recorded_at: string
-}
-
 export const api = {
   // Agent Profiles & Providers
   listProfiles: () => fetchJSON<AgentProfileInfo[]>('/agents/profiles'),
@@ -185,17 +168,6 @@ export const api = {
   enableFlow: (name: string) => fetchJSON<{ success: boolean }>(`/flows/${name}/enable`, { method: 'POST' }),
   disableFlow: (name: string) => fetchJSON<{ success: boolean }>(`/flows/${name}/disable`, { method: 'POST' }),
   runFlow: (name: string) => fetchJSON<{ executed: boolean }>(`/flows/${name}/run`, { method: 'POST', timeoutMs: 90000 }),
-
-  // Token usage
-  listTokenUsage: (filters?: { terminalId?: string; runId?: string; stepId?: string; limit?: number }) => {
-    const params = [
-      filters?.terminalId ? `terminal_id=${encodeURIComponent(filters.terminalId)}` : '',
-      filters?.runId ? `run_id=${encodeURIComponent(filters.runId)}` : '',
-      filters?.stepId ? `step_id=${encodeURIComponent(filters.stepId)}` : '',
-      `limit=${filters?.limit ?? 1000}`,
-    ].filter(Boolean).join('&')
-    return fetchJSON<WorkerTokenUsageRecord[]>(`/token-usage?${params}`)
-  },
 
   // Memory
   getMemoryStatus: () => fetchJSON<MemoryStatus>('/settings/memory'),

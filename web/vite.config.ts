@@ -1,12 +1,19 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   plugins: [react()],
   build: {
     outDir: '../src/cli_agent_orchestrator/web_ui',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        token: fileURLToPath(new URL('./token.html', import.meta.url)),
+      },
+    },
   },
   test: {
     globals: true,

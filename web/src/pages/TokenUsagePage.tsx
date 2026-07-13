@@ -1,56 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, WorkerTokenUsageRecord } from '../api'
+import { tokenApi } from '../token-api'
+import { WorkerTokenUsageRecord } from '../token-types'
+import { dailyStats, displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, modelStats, sum, toggleValue, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
 import { BarChart3, Check, ChevronDown, Clock3, Database, Filter, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
-
-type FilterKey = 'provider' | 'agent' | 'model' | 'effort'
-type RangeKey = 'all' | '24h' | '7d' | '30d'
-type SortKey = 'latest' | 'total' | 'input' | 'output'
-
-const EMPTY_FILTERS: Record<FilterKey, string[]> = { provider: [], agent: [], model: [], effort: [] }
-
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`
-  return value.toLocaleString()
-}
-
-function formatExact(value: number): string {
-  return value.toLocaleString()
-}
-
-function labelFor(value: string | null | undefined): string {
-  return value || 'Default'
-}
-
-function displayProvider(value: string): string {
-  return value.replace(/_cli$/, '').replace(/_/g, ' ')
-}
-
-function displayDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-function displayDay(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10)
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function getPathLabel(value: string | null): string {
-  if (!value) return 'Progress not recorded'
-  const parts = value.split('/')
-  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : value
-}
-
-function sum(records: WorkerTokenUsageRecord[], key: 'input_tokens' | 'output_tokens' | 'total_tokens'): number {
-  return records.reduce((total, row) => total + row[key], 0)
-}
-
-function toggleValue(values: string[], value: string): string[] {
-  return values.includes(value) ? values.filter(item => item !== value) : [...values, value]
-}
 
 function FilterGroup({
   title,
@@ -117,12 +69,12 @@ function StatCard({ label, value, detail, tone, icon }: { label: string; value: 
   )
 }
 
-export function TokenUsagePanel() {
+export function TokenUsagePage() {
   const [records, setRecords] = useState<WorkerTokenUsageRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filters, setFilters] = useState<Record<FilterKey, string[]>>(EMPTY_FILTERS)
+  const [filters, setFilters] = useState<TokenFilters>(EMPTY_FILTERS)
   const [range, setRange] = useState<RangeKey>('all')
   const [sort, setSort] = useState<SortKey>('latest')
   const [query, setQuery] = useState('')
@@ -132,7 +84,7 @@ export function TokenUsagePanel() {
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
     try {
-      const data = await api.listTokenUsage({ limit: 1000 })
+      const data = await tokenApi.listTokenUsage({ limit: 1000 })
       setRecords(data)
       setError(null)
     } catch (err) {
@@ -157,24 +109,7 @@ export function TokenUsagePanel() {
   }), [records])
 
   const filteredRecords = useMemo(() => {
-    const now = Date.now()
-    const rangeMs: Record<RangeKey, number | null> = { all: null, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000, '30d': 30 * 24 * 60 * 60 * 1000 }
-    const needle = query.trim().toLowerCase()
-    return records.filter(row => {
-      const date = new Date(row.recorded_at).getTime()
-      const inRange = rangeMs[range] === null || (!Number.isNaN(date) && now - date <= rangeMs[range]!)
-      const matchesSearch = !needle || [row.progress, row.run_id, row.step_id, row.terminal_id, row.agent, row.model].some(value => value?.toLowerCase().includes(needle))
-      return inRange && matchesSearch &&
-        (!filters.provider.length || filters.provider.includes(row.provider)) &&
-        (!filters.agent.length || filters.agent.includes(row.agent)) &&
-        (!filters.model.length || filters.model.includes(row.model || '')) &&
-        (!filters.effort.length || filters.effort.includes(row.effort || ''))
-    }).sort((a, b) => {
-      if (sort === 'total') return b.total_tokens - a.total_tokens
-      if (sort === 'input') return b.input_tokens - a.input_tokens
-      if (sort === 'output') return b.output_tokens - a.output_tokens
-      return new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
-    })
+    return filterAndSortRecords(records, filters, range, query, sort)
   }, [records, filters, range, query, sort])
 
   const totals = useMemo(() => ({
@@ -183,26 +118,11 @@ export function TokenUsagePanel() {
     total: sum(filteredRecords, 'total_tokens'),
   }), [filteredRecords])
 
-  const dailyStats = useMemo(() => {
-    const byDay = new Map<string, number>()
-    filteredRecords.forEach(row => {
-      const key = row.recorded_at.slice(0, 10)
-      byDay.set(key, (byDay.get(key) || 0) + row.total_tokens)
-    })
-    return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-7)
-  }, [filteredRecords])
+  const usageByDay = useMemo(() => dailyStats(filteredRecords), [filteredRecords])
+  const usageByModel = useMemo(() => modelStats(filteredRecords), [filteredRecords])
 
-  const modelStats = useMemo(() => {
-    const byModel = new Map<string, number>()
-    filteredRecords.forEach(row => {
-      const key = row.model || 'provider default'
-      byModel.set(key, (byModel.get(key) || 0) + row.total_tokens)
-    })
-    return [...byModel.entries()].sort(([, a], [, b]) => b - a).slice(0, 5)
-  }, [filteredRecords])
-
-  const maxDay = Math.max(...dailyStats.map(([, value]) => value), 1)
-  const maxModel = Math.max(...modelStats.map(([, value]) => value), 1)
+  const maxDay = Math.max(...usageByDay.map(([, value]) => value), 1)
+  const maxModel = Math.max(...usageByModel.map(([, value]) => value), 1)
   const activeFilterCount = Object.values(filters).reduce((count, values) => count + values.length, 0) + (range !== 'all' ? 1 : 0) + (query ? 1 : 0)
 
   const clearFilters = () => {
@@ -219,6 +139,7 @@ export function TokenUsagePanel() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
+          <a href="/" className="text-xs text-emerald-400 hover:text-emerald-300">← Back to Dashboard</a>
           <div className="flex items-center gap-2 text-emerald-400">
             <BarChart3 size={18} />
             <span className="text-xs font-semibold uppercase tracking-[0.18em]">Operations insight</span>
@@ -290,9 +211,9 @@ export function TokenUsagePanel() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,1fr)]">
             <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
               <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-white">Usage by day</h3><p className="mt-1 text-xs text-gray-500">Last 7 days in the current view</p></div><span className="text-xs text-gray-500">{filteredRecords.length} attempts</span></div>
-              {dailyStats.length ? (
+              {usageByDay.length ? (
                 <div className="mt-5 flex h-36 items-end gap-2 sm:gap-3">
-                  {dailyStats.map(([day, value]) => (
+                  {usageByDay.map(([day, value]) => (
                     <div key={day} className="flex min-w-0 flex-1 flex-col items-center gap-2">
                       <span className="text-[10px] text-gray-500">{formatTokens(value)}</span>
                       <div className="flex h-24 w-full items-end"><div className="w-full rounded-t-md bg-gradient-to-t from-emerald-700 to-emerald-400 transition-all" style={{ height: `${Math.max((value / maxDay) * 100, 5)}%` }} title={`${formatExact(value)} tokens`} /></div>
@@ -304,7 +225,7 @@ export function TokenUsagePanel() {
             </div>
             <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
               <h3 className="text-sm font-semibold text-white">By model</h3><p className="mt-1 text-xs text-gray-500">Total tokens by resolved model</p>
-              {modelStats.length ? <div className="mt-5 space-y-4">{modelStats.map(([model, value]) => <div key={model}><div className="mb-1 flex items-center justify-between gap-3 text-xs"><span className="truncate text-gray-300" title={model}>{model}</span><span className="shrink-0 text-gray-500">{formatTokens(value)}</span></div><div className="h-2 rounded-full bg-gray-800"><div className="h-2 rounded-full bg-cyan-400/80" style={{ width: `${Math.max((value / maxModel) * 100, 4)}%` }} /></div></div>)}</div> : <EmptyChart message="No model data yet" />}
+              {usageByModel.length ? <div className="mt-5 space-y-4">{usageByModel.map(([model, value]) => <div key={model}><div className="mb-1 flex items-center justify-between gap-3 text-xs"><span className="truncate text-gray-300" title={model}>{model}</span><span className="shrink-0 text-gray-500">{formatTokens(value)}</span></div><div className="h-2 rounded-full bg-gray-800"><div className="h-2 rounded-full bg-cyan-400/80" style={{ width: `${Math.max((value / maxModel) * 100, 4)}%` }} /></div></div>)}</div> : <EmptyChart message="No model data yet" />}
             </div>
           </div>
 
