@@ -118,9 +118,9 @@ describe('TokenUsagePage', () => {
     fireEvent.change(screen.getByLabelText('Custom date to'), { target: { value: '2026-07-13' } })
 
     await waitFor(() => {
-      const latest = list.mock.calls.at(-1)?.[0]
-      expect(latest?.from).toContain('2026-07-01')
-      expect(latest?.to).toContain('2026-07-14')
+      const latest = list.mock.calls[list.mock.calls.length - 1]?.[0]
+      expect(new Date(latest?.from || '').getTime()).toBe(new Date('2026-07-01T00:00:00').getTime())
+      expect(new Date(latest?.to || '').getTime()).toBe(new Date('2026-07-13T23:59:59.999').getTime())
       expect(latest?.cursor).toBeUndefined()
       expect(latest?.snapshotAt).toBeUndefined()
     })
