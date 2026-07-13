@@ -93,10 +93,6 @@ from cli_agent_orchestrator.services import (
     terminal_service,
 )
 from cli_agent_orchestrator.services.agent_step import StepExecutionError, run_agent_step
-from cli_agent_orchestrator.services.structured_worker import (
-    StructuredWorkerError,
-    run_structured_worker_step,
-)
 from cli_agent_orchestrator.services.cleanup_service import (
     cleanup_expired_memories,
     cleanup_old_data,
@@ -112,6 +108,10 @@ from cli_agent_orchestrator.services.install_service import InstallResult, insta
 from cli_agent_orchestrator.services.log_writer import log_writer
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.step_output_store import _validate_key_part
+from cli_agent_orchestrator.services.structured_worker import (
+    StructuredWorkerError,
+    run_structured_worker_step,
+)
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
 from cli_agent_orchestrator.services.token_usage import TokenUsage
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
