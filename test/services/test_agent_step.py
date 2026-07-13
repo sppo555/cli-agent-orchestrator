@@ -52,9 +52,8 @@ def _patch_terminal_layer(
 
 
 class TestHappyPath:
-    def test_approved_native_usage_reaches_persistence_handoff(self):
+    def test_interactive_path_remains_estimate_only(self):
         create, send, delete, get_output, exit_cli, wait, status = _patch_terminal_layer()
-        native_raw = '{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":12}}'
         with (
             create,
             send,
@@ -65,15 +64,13 @@ class TestHappyPath:
             status,
             patch(f"{_MODULE}.persist_worker_token_usage") as persist,
         ):
-            m_out.side_effect = lambda _terminal_id, mode: native_raw if mode == OutputMode.FULL else "the answer"
+            m_out.return_value = "the answer"
             result = asyncio.run(run_agent_step("codex", "developer", "do the task"))
 
-        assert result.token_usage.estimated is False
-        assert result.token_usage.input_tokens == 40
-        assert result.token_usage.output_tokens == 12
-        assert result.token_usage.total_tokens == 52
-        assert persist.call_args.kwargs["usage"].estimated is False
-        assert persist.call_args.kwargs["usage"].total_tokens == 52
+        assert result.token_usage.estimated is True
+        assert result.token_usage.total_tokens == 6
+        assert persist.call_args.kwargs["usage"].estimated is True
+        m_out.assert_called_once_with("abc12345", OutputMode.LAST)
 
     def test_create_per_call_runs_full_sequence_and_tears_down(self):
         create, send, delete, get_output, exit_cli, wait, status = _patch_terminal_layer()

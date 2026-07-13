@@ -87,7 +87,7 @@ def extract_claude_code_usage(raw_output: Any) -> Optional[NativeUsage]:
 
 
 def extract_codex_usage(raw_output: Any) -> Optional[NativeUsage]:
-    """Extract usage from Codex turn-completed or token-count JSONL events."""
+    """Extract usage from Codex structured turn-completed JSONL events."""
 
     found: Optional[NativeUsage] = None
     for event in _json_objects(raw_output):
@@ -98,16 +98,58 @@ def extract_codex_usage(raw_output: Any) -> Optional[NativeUsage]:
             params = event.get("params")
             if isinstance(params, Mapping) and isinstance(params.get("turn"), Mapping):
                 candidates.append(params["turn"].get("usage"))
-        payload = event.get("payload")
-        if event.get("type") == "event_msg" and isinstance(payload, Mapping) and payload.get("type") == "token_count":
-            info = payload.get("info", {})
-            if isinstance(info, Mapping):
-                candidates.append(info.get("last_token_usage"))
         for candidate in candidates:
             usage = _native_usage(candidate)
             if usage is not None:
                 found = usage
     return found
+
+
+def _message_text(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return None
+    parts: list[str] = []
+    for block in value:
+        if not isinstance(block, Mapping):
+            continue
+        text = block.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts) or None
+
+
+def extract_codex_last_message(raw_output: Any) -> str:
+    """Extract the final assistant message from Codex structured JSONL only.
+
+    This parser intentionally accepts event envelopes emitted by the structured
+    Codex command and does not inspect terminal prose or rollout/session files.
+    Completed item events win over streaming deltas when both are present.
+    """
+
+    last_completed: Optional[str] = None
+    deltas: list[str] = []
+    for event in _json_objects(raw_output):
+        event_type = event.get("type") or event.get("method")
+        item = event.get("item")
+        if isinstance(item, Mapping):
+            item_type = item.get("type")
+            if item_type in {"agent_message", "agentMessage", "assistant_message"}:
+                text = _message_text(item.get("text"))
+                if text is None:
+                    text = _message_text(item.get("content"))
+                if text is not None and event_type in {"item.completed", "item/completed"}:
+                    last_completed = text
+        if event_type in {"item/agent_message/delta", "item.agent_message.delta"}:
+            delta = event.get("delta")
+            if isinstance(delta, str):
+                deltas.append(delta)
+        if event_type in {"agent_message", "agentMessage"}:
+            text = _message_text(event.get("text"))
+            if text is not None:
+                last_completed = text
+    return last_completed if last_completed is not None else "".join(deltas)
 
 
 def extract_native_usage(provider: str, raw_output: Any) -> Optional[NativeUsage]:

@@ -5,6 +5,7 @@ import pytest
 from cli_agent_orchestrator.services.token_usage_adapters import (
     extract_claude_code_usage,
     extract_codex_usage,
+    extract_codex_last_message,
     extract_native_usage,
 )
 from cli_agent_orchestrator.services.token_usage_contract import UsageSource, extract_usage
@@ -31,6 +32,22 @@ def test_codex_fixture_extracts_turn_usage_without_parsing_cached_subfield():
     assert usage.total_tokens == 280
 
 
+def test_codex_structured_parser_extracts_message_only_from_completed_items():
+    raw = (
+        '{"type":"item/agent_message/delta","delta":"first"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"final"}}\n'
+    )
+    assert extract_codex_last_message(raw) == "final"
+
+
+def test_codex_structured_parser_can_reassemble_message_deltas():
+    raw = (
+        '{"type":"item/agent_message/delta","delta":"first"}\n'
+        '{"type":"item/agent_message/delta","delta":" second"}\n'
+    )
+    assert extract_codex_last_message(raw) == "first second"
+
+
 def test_provider_dispatch_and_contract_return_native_usage():
     raw = '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}'
 
@@ -49,6 +66,7 @@ def test_provider_dispatch_and_contract_return_native_usage():
         '{"type":"turn.completed","usage":{"input_tokens":1.5,"output_tokens":5}}',
         '{"type":"turn.completed","usage":{"input_tokens":"1","output_tokens":5}}',
         '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":5,"total_tokens":99}}',
+        '{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":9,"output_tokens":3}}}}',
         "ordinary response with input_tokens=1 output_tokens=5",
         "{malformed json",
     ],

@@ -53,6 +53,37 @@ class TestRunStepEndpoint:
         assert kwargs["agent"] == "developer"
         assert kwargs["prompt"] == "do it"
 
+    def test_structured_mode_is_explicit_and_does_not_call_interactive_substrate(self, client):
+        result = AgentStepResult(
+            terminal_id="abc12345",
+            last_message="structured",
+            status=TerminalStatus.COMPLETED,
+            token_usage=TokenUsage(input_tokens=40, output_tokens=12, total_tokens=52, estimated=False),
+        )
+        with (
+            patch(
+                "cli_agent_orchestrator.api.main.run_structured_worker_step",
+                new=AsyncMock(return_value=result),
+            ) as structured,
+            patch(_RUN_STEP, new=AsyncMock()) as interactive,
+        ):
+            resp = client.post(
+                TERMINALS_RUN_STEP_ROUTE,
+                json=_body(provider="codex", execution_mode="structured"),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["token_usage"]["estimated"] is False
+        structured.assert_awaited_once()
+        interactive.assert_not_awaited()
+
+    def test_structured_mode_rejects_terminal_lifecycle_fields(self, client):
+        resp = client.post(
+            TERMINALS_RUN_STEP_ROUTE,
+            json=_body(provider="codex", execution_mode="structured", session_name="existing"),
+        )
+        assert resp.status_code == 422
+
     def test_timeout_maps_to_504_with_structured_terminal_id(self, client):
         with patch(
             _RUN_STEP,

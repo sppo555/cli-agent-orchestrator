@@ -26,7 +26,6 @@ import logging
 from typing import Callable, Optional
 
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
-from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.services import terminal_service
 from cli_agent_orchestrator.services.status_monitor import status_monitor
@@ -37,7 +36,6 @@ from cli_agent_orchestrator.services.token_usage import (
     resolve_worker_configuration,
     resolve_worker_progress,
 )
-from cli_agent_orchestrator.services.token_usage_contract import extract_usage
 from cli_agent_orchestrator.utils.terminal import wait_until_status
 
 logger = logging.getLogger(__name__)
@@ -278,29 +276,11 @@ async def run_agent_step(
 
     model, effort = resolve_worker_configuration(provider, agent)
     progress = resolve_worker_progress(progress, prompt, last_message)
-    native_usage = None
-    if provider in {"claude_code", "codex"}:
-        try:
-            raw_output = await asyncio.to_thread(
-                terminal_service.get_output, terminal_id, OutputMode.FULL
-            )
-            native_usage = extract_usage(provider, raw_output, last_message)
-        except Exception as exc:  # noqa: BLE001 — native accounting is best-effort
-            logger.warning("Native token usage extraction failed for %s: %s", provider, exc)
-    if native_usage is not None:
-        usage = TokenUsage(
-            input_tokens=native_usage.input_tokens,
-            output_tokens=native_usage.output_tokens,
-            total_tokens=native_usage.total_tokens,
-            estimated=False,
-            model=native_usage.model or model,
-            effort=effort,
-            progress=progress,
-        )
-    else:
-        usage = estimate_token_usage(
-            prompt, last_message, model=model, effort=effort, progress=progress
-        )
+    # Keep the interactive substrate estimate-only. Native token accounting
+    # belongs to the explicit structured worker mode, whose stdout is a
+    # provider-owned JSON/JSONL contract. Terminal scrollback is deliberately
+    # not a production usage source.
+    usage = estimate_token_usage(prompt, last_message, model=model, effort=effort, progress=progress)
     result = AgentStepResult(
         terminal_id=terminal_id,
         last_message=last_message,

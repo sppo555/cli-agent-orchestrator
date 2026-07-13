@@ -93,6 +93,10 @@ from cli_agent_orchestrator.services import (
     terminal_service,
 )
 from cli_agent_orchestrator.services.agent_step import StepExecutionError, run_agent_step
+from cli_agent_orchestrator.services.structured_worker import (
+    StructuredWorkerError,
+    run_structured_worker_step,
+)
 from cli_agent_orchestrator.services.cleanup_service import (
     cleanup_expired_memories,
     cleanup_old_data,
@@ -202,6 +206,14 @@ class RunStepRequest(BaseModel):
     provider: str = Field(description="Provider type (e.g. 'kiro_cli', 'claude_code')")
     agent: str = Field(description="Agent profile name")
     prompt: str = Field(description="Prompt to send (caller applies any prompt shaping first)")
+    execution_mode: str = Field(
+        default="interactive",
+        pattern="^(interactive|structured)$",
+        description=(
+            "Execution contract. interactive keeps the existing tmux flow; "
+            "structured launches the provider's machine-readable worker command."
+        ),
+    )
     progress: Optional[str] = Field(
         default=None,
         max_length=1024,
@@ -309,6 +321,15 @@ class RunStepRequest(BaseModel):
             raise ValueError(
                 "env_vars cannot be injected into a reused terminal "
                 "(env injection only applies to freshly created terminals)"
+            )
+        if self.execution_mode == "structured" and (
+            self.session_name is not None
+            or self.reuse_terminal_id is not None
+            or self.caller_id is not None
+        ):
+            raise ValueError(
+                "structured mode does not accept session_name, "
+                "reuse_terminal_id, or caller_id"
             )
         return self
 
@@ -1742,27 +1763,44 @@ async def run_step(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     try:
-        result = await run_agent_step(
-            provider=body.provider,
-            agent=body.agent,
-            prompt=body.prompt,
-            session_name=body.session_name,
-            reuse_terminal_id=body.reuse_terminal_id,
-            teardown=body.teardown,
-            timeout=body.timeout,
-            working_directory=body.working_directory,
-            caller_id=body.caller_id,
-            allowed_tools=body.allowed_tools,
-            registry=get_plugin_registry(request),
-            env_vars=body.env_vars,
-            on_terminal_created=on_terminal_created,
-            progress=body.progress,
-        )
+        if body.execution_mode == "structured":
+            result = await run_structured_worker_step(
+                provider=body.provider,
+                agent=body.agent,
+                prompt=body.prompt,
+                timeout=body.timeout,
+                working_directory=body.working_directory,
+                allowed_tools=body.allowed_tools,
+                env_vars=body.env_vars,
+                progress=body.progress,
+            )
+        else:
+            result = await run_agent_step(
+                provider=body.provider,
+                agent=body.agent,
+                prompt=body.prompt,
+                session_name=body.session_name,
+                reuse_terminal_id=body.reuse_terminal_id,
+                teardown=body.teardown,
+                timeout=body.timeout,
+                working_directory=body.working_directory,
+                caller_id=body.caller_id,
+                allowed_tools=body.allowed_tools,
+                registry=get_plugin_registry(request),
+                env_vars=body.env_vars,
+                on_terminal_created=on_terminal_created,
+                progress=body.progress,
+            )
         return RunStepResponse(
             terminal_id=result.terminal_id,
             last_message=result.last_message,
             status=(result.status.value if hasattr(result.status, "value") else str(result.status)),
             token_usage=result.token_usage,
+        )
+    except StructuredWorkerError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": str(e), "kind": "error", "terminal_id": None},
         )
     except StepExecutionError as e:
         # The step did not complete successfully. Distinguish a worker that

@@ -333,6 +333,28 @@ class CodexProvider(BaseProvider):
 
         return shlex.join(command_parts)
 
+    def build_structured_command(self) -> list[str]:
+        """Build the non-interactive Codex JSONL command.
+
+        This is a separate launch contract from the tmux/TUI command above.
+        The structured worker consumes stdout events from the exec command; it
+        never reads terminal scrollback.
+        """
+        interactive_parts = shlex.split(self._build_codex_command())
+        command_parts = [interactive_parts[0], "exec", "--json", "--ephemeral"]
+        skip_next = False
+        for part in interactive_parts[1:]:
+            if skip_next:
+                skip_next = False
+                continue
+            if part == "--no-alt-screen":
+                continue
+            if part == "--disable":
+                skip_next = True
+                continue
+            command_parts.append(part)
+        return command_parts
+
     async def _handle_trust_prompt(self, timeout: float = 20.0) -> None:
         """Auto-accept the workspace trust prompt if it appears.
 
