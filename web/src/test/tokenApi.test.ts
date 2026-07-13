@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { tokenApi } from '../token-api'
+import { TokenApiError, tokenApi } from '../token-api'
 
 describe('Token API wrapper', () => {
   afterEach(() => {
@@ -50,7 +50,7 @@ describe('Token API wrapper', () => {
       .mockRejectedValueOnce(new Error('network down'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(tokenApi.listTokenUsage()).rejects.toThrow('503 Unavailable')
+    await expect(tokenApi.listTokenUsage()).rejects.toMatchObject({ status: 503, name: 'TokenApiError' } satisfies Partial<TokenApiError>)
     await expect(tokenApi.listTokenUsage()).rejects.toThrow('invalid json')
     await expect(tokenApi.listTokenUsage()).rejects.toThrow('network down')
   })

@@ -12,12 +12,19 @@ export interface TokenUsageQuery {
   snapshotAt?: string
 }
 
+export class TokenApiError extends Error {
+  constructor(public readonly status: number | null, message: string) {
+    super(message)
+    this.name = 'TokenApiError'
+  }
+}
+
 async function fetchTokenJSON<T>(url: string, timeoutMs = 10000): Promise<T> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, { signal: controller.signal })
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+    if (!response.ok) throw new TokenApiError(response.status, `${response.status} ${response.statusText}`)
     return response.json()
   } finally {
     clearTimeout(timeout)

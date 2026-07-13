@@ -9,6 +9,7 @@
 - 4.2 is no longer local customization work. Antigravity CLI provider was merged upstream in `086e61a` / awslabs#323.
 - 4.5 is not in this repo. The 9-worker model selection work belongs to `/Users/alex/Developer/CAO-Tailscale` and has already been implemented there.
 - This repo now carries package-level customizations 4.1, 4.3, 4.4, 4.6, 4.7, 4.11, 4.12, 4.13, 4.14, and 4.15.
+- Token usage 4.17.1–4.17.5 is the current successor series: standalone page, query completeness, provider evidence contract, Codex/Claude structured native adapters, durable recovery, and token-specific UX. Interactive execution remains estimate-only.
 - 4.8 was investigated and implemented on its own branch, but was reverted from the integration branch. Keep the branch for reference; do not merge it until the cleanup behavior is redesigned.
 - 4.9 and 4.10 were merged into a single **profile-only** version and implemented in `/Users/alex/Developer/CAO-Tailscale` (workers/supervisor profiles), not in this package repo. 4.8 is explicitly not adopted by that version.
 
@@ -30,6 +31,7 @@
 | 4.13 Worker init headless render-viewer | `custom/4.13-worker-init-headless-viewer` | `deebf65` | `c63ba38` | Done; viewer sizing is session-scoped |
 | 4.14 Worker init status recovery from UNKNOWN | `custom/4.14-worker-init-status-recovery` | `custom/4.6-status-turn-boundary` | `0bfb7d7` | Done |
 | 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
+| 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | current owner HEAD | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
 | Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
 
 ## 2026-07-12 Sync Record
@@ -199,6 +201,14 @@
 - Persists one usage record per completed worker attempt before terminal teardown.
 - Records token estimates, provider, agent, model, effort, run/step identity, and optional progress/artifact path.
 - `GET /token-usage` lists records after the terminal has been deleted; progress can be supplied explicitly or inferred from `.cao/worker-results/...` in the worker prompt/reply.
+
+### 4.17.1–4.17.5 Worker token usage successor series
+
+- 4.17.1 moved Token Usage to the isolated `token.html` entry and added the dashboard anchor/icon.
+- 4.17.2 added authenticated page/summary endpoints with snapshot keyset pagination, repeated filters, null sentinels, and Load more.
+- 4.17.3/4.17.4 added the nine-provider evidence inventory and strict Claude Code/Codex structured adapters. Native usage is sourced only from provider-owned structured stdout; interactive remains estimate-only.
+- 4.17.5 F1 added an owner-only fsynced metadata spool with idempotent replay, quarantine, metrics, concurrent writer/flusher protection, and no prompt/response/session-log data.
+- 4.17.5 F2 added validated custom dates, safe local artifact links, UTF-8 CSV export with formula mitigation, provenance split, attempt drill-down, and migration/API/no-data guidance. Changes remain token-specific and do not re-enter `App.tsx` state.
 
 ## Validation
 

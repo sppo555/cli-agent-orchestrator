@@ -1,6 +1,8 @@
 import json
 import os
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -110,6 +112,30 @@ def test_flush_replays_and_duplicate_record_id_is_idempotent(spool_home, monkeyp
         assert conn.execute("SELECT COUNT(*) FROM worker_token_usage").fetchone()[0] == 1
 
 
+def test_reload_and_replay_simulates_restart_without_duplicate_row(spool_home, monkeypatch):
+    import importlib
+    import sqlite3
+
+    from cli_agent_orchestrator.clients.database import _migrate_worker_token_usage, list_worker_token_usage
+
+    db_file = spool_home / "restart.db"
+    monkeypatch.setattr("cli_agent_orchestrator.constants.DATABASE_FILE", db_file)
+    _migrate_worker_token_usage()
+    payload = _payload(record_id="restart-record")
+    spool.append_token_usage_spool(payload)
+    first = spool.flush_token_usage_spool()
+    assert first.flushed == 1
+
+    reloaded = importlib.reload(spool)
+    restarted_payload = reloaded.TokenUsageSpoolPayload.model_validate_json(payload.model_dump_json())
+    reloaded.append_token_usage_spool(restarted_payload)
+    second = reloaded.flush_token_usage_spool()
+    assert second.flushed == 1
+    assert len(list_worker_token_usage()) == 1
+    with sqlite3.connect(str(db_file)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM worker_token_usage").fetchone()[0] == 1
+
+
 def test_database_failure_retains_all_unacknowledged_items(spool_home):
     spool.append_token_usage_spool(_payload(record_id="record-1"))
     spool.append_token_usage_spool(_payload(record_id="record-2"))
@@ -198,6 +224,45 @@ def test_partial_os_write_leaves_visible_tail_instead_of_silent_loss(spool_home)
     pending = spool_home / "token-usage-spool" / "pending.jsonl"
     assert pending.exists()
     assert not pending.read_bytes().endswith(b"\n")
+
+
+def test_utf8_metadata_is_replayed_without_line_corruption(spool_home):
+    payload = _payload()
+    payload = payload.model_copy(update={"agent": "審查者", "progress": ".cao/worker-results/結果.md"})
+    spool.append_token_usage_spool(payload)
+    with patch("cli_agent_orchestrator.clients.database.record_worker_token_usage") as record:
+        result = spool.flush_token_usage_spool()
+    assert result.flushed == 1
+    assert record.call_args.kwargs["agent"] == "審查者"
+    assert record.call_args.kwargs["progress"] == ".cao/worker-results/結果.md"
+
+
+def test_concurrent_writer_and_flusher_do_not_lose_or_overwrite_items(spool_home):
+    first = _payload(record_id="first")
+    second = _payload(record_id="second")
+    spool.append_token_usage_spool(first)
+    entered_db = threading.Event()
+    release_db = threading.Event()
+
+    def record_slowly(**_kwargs):
+        entered_db.set()
+        assert release_db.wait(timeout=2)
+
+    with patch("cli_agent_orchestrator.clients.database.record_worker_token_usage", side_effect=record_slowly):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            flush_future = pool.submit(spool.flush_token_usage_spool)
+            assert entered_db.wait(timeout=2)
+            append_future = pool.submit(spool.append_token_usage_spool, second)
+            release_db.set()
+            assert flush_future.result(timeout=2).flushed == 1
+            append_future.result(timeout=2)
+
+    pending = spool_home / "token-usage-spool" / "pending.jsonl"
+    assert pending.read_text().count("second") == 1
+    with patch("cli_agent_orchestrator.clients.database.record_worker_token_usage") as record:
+        result = spool.flush_token_usage_spool()
+    assert result.flushed == 1
+    record.assert_called_once()
 
 
 def test_fsync_failure_keeps_written_item_visible(spool_home):

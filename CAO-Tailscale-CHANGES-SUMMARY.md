@@ -135,6 +135,22 @@ The integration now persists one row for every completed `run_agent_step` attemp
 
 Records remain queryable after terminal deletion through `GET /token-usage`, filtered by `terminal_id`, `run_id`, or `step_id`. A workflow step can set `progress` to an artifact path such as `.cao/worker-results/20260713T010600Z-v0.7.0-slice7-admin-reset-plan-review-r2-reviewer.md`; if omitted, CAO infers a matching `.cao/worker-results/...` path from the worker prompt or final response.
 
+### 4.17 Token usage successor series
+
+The 4.17.1–4.17.5 successor series replaces the old in-app token tab with the
+isolated `/token.html` page, adds snapshot/keyset query APIs, and keeps the
+existing `/token-usage` endpoint backward compatible. Codex and Claude Code
+structured worker mode now consume only provider-owned machine-readable stdout;
+the existing interactive tmux path remains estimate-only.
+
+F1 durable recovery uses an owner-only fsynced metadata spool when SQLite is
+unavailable. Replay is idempotent by record id, malformed records are
+quarantined, and prompt/response/transcript/session-log data is excluded.
+F2 adds custom date ranges, safe local artifact links, UTF-8 CSV export with
+formula-cell mitigation, provenance split, attempt drill-down, and explicit
+migration/API/no-data guidance. The page remains isolated from `App.tsx` and
+shared dashboard state.
+
 ## Deferred / Proposed Package Work
 
 ### 4.8 Agy handoff terminal retention (deferred)

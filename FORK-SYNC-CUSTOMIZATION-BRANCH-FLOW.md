@@ -467,6 +467,17 @@ The previous clean rebuilds were:
 - fork sync to `462fa2f`: customs 4.1 `77b14d2` / 4.3 `7569b22` / 4.4 `e2c2b58`
   / 4.6 `dccf768` / 4.7 `0ba72a5`.
 
+### 4.17 token usage successor integration note
+
+The active owner branch is `custom/4.17.5-token-usage-recovery-ux`, successor of
+the 4.17.4 native-adapter branch. It contains the complete 4.17.1–4.17.5
+ancestry and must be integrated as the highest approved successor only. Before
+the next fixed-name integration rebuild, merge the latest `origin/main`, record
+the upstream range and Web overlap review, then merge this successor with
+`--no-ff`. Do not separately merge the superseded 4.16 tab or earlier 4.17
+branches. Token-specific frontend changes remain isolated from `App.tsx` and
+shared dashboard state.
+
 4.5 remains in CAO-Tailscale and is intentionally not merged here.
 
 4.8 remains on `custom/4.8-agy-handoff-terminal-retention` at `56500e4` (doc) / `ace213f` (code), but was reverted from integration and is superseded by 4.9.

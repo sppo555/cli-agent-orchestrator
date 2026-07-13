@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { tokenApi } from '../token-api'
+import { TokenApiError } from '../token-api'
 import { WorkerTokenUsageRecord, WorkerTokenUsageSummary } from '../token-types'
 import { displayDate, displayDay, displayProvider, EMPTY_FILTERS, filterAndSortRecords, formatExact, formatTokens, getPathLabel, labelFor, rangeBounds, recordsToCsv, safeArtifactHref, toggleValue, usageSplit, usageStatus, validateCustomRange, FilterKey, RangeKey, SortKey, TokenFilters } from './tokenUsage'
 import { BarChart3, Check, ChevronDown, ChevronRight, Clock3, Database, Download, FileText, Filter, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
@@ -75,6 +76,18 @@ function ProgressValue({ value }: { value: string | null }) {
   return href ? <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-emerald-300 underline decoration-emerald-500/30 underline-offset-2 hover:text-emerald-200"><FileText size={12} />{label}</a> : <span className="truncate">{label}</span>
 }
 
+function errorGuidance(error: string | null): { title: string; detail: string } {
+  if (!error) return { title: '', detail: '' }
+  const lower = error.toLowerCase()
+  if (lower.includes('no such table') || lower.includes('migration')) {
+    return { title: 'Token usage migration is missing.', detail: 'Restart the CAO server once to create the durable usage table, then refresh.' }
+  }
+  if (lower.includes('401') || lower.includes('403')) {
+    return { title: 'Token usage access is unavailable.', detail: 'Sign in with a scope that can read worker token usage, then retry.' }
+  }
+  return { title: 'Token usage API is unavailable.', detail: 'The worker usage page could not reach the server. Retry without changing your current filters.' }
+}
+
 export function TokenUsagePage() {
   const [records, setRecords] = useState<WorkerTokenUsageRecord[]>([])
   const [summary, setSummary] = useState<WorkerTokenUsageSummary | null>(null)
@@ -122,7 +135,7 @@ export function TokenUsagePage() {
       setError(null)
     } catch (err) {
       if (sequence !== requestSequence.current) return
-      setError(err instanceof Error ? err.message : 'Unable to load token usage')
+      setError(err instanceof TokenApiError ? err.message : err instanceof Error ? err.message : 'Unable to load token usage')
     } finally {
       if (sequence === requestSequence.current) {
         setLoading(false)
@@ -187,6 +200,8 @@ export function TokenUsagePage() {
     setSnapshotAt(null)
   }
 
+  const guidance = errorGuidance(error)
+
   const updateCustomDate = (field: 'from' | 'to', value: string) => {
     if (field === 'from') setCustomFrom(value)
     else setCustomTo(value)
@@ -229,7 +244,7 @@ export function TokenUsagePage() {
       {error && (
         <div role="alert" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-950/20 p-4 text-sm text-amber-200">
           <Database size={18} className="mt-0.5 shrink-0 text-amber-400" />
-          <div><p className="font-medium">Token usage is not available yet.</p><p className="mt-1 text-amber-200/70">{error}. Restart the CAO server once so the usage table migration can run.</p></div>
+          <div><p className="font-medium">{guidance.title}</p><p className="mt-1 text-amber-200/70">{guidance.detail}</p><p className="mt-1 text-[11px] text-amber-200/50">{error}</p></div>
         </div>
       )}
 

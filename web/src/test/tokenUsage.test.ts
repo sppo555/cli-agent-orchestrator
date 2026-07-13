@@ -96,5 +96,6 @@ describe('token usage view model helpers', () => {
     expect(usageSplit(records)).toEqual({ native: 500, estimated: 500, unknown: 0 })
     expect(usageStatus(false)).toBe('native')
     expect(usageStatus(undefined)).toBe('unknown')
+    expect(usageSplit([{ ...records[0], estimated: undefined as unknown as boolean }])).toEqual({ native: 0, estimated: 0, unknown: 500 })
   })
 })

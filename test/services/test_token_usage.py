@@ -44,3 +44,5 @@ def test_resolve_worker_progress_prefers_explicit_then_artifact_path():
     )
     assert resolve_worker_progress("explicit.md", "", artifact) == "explicit.md"
     assert resolve_worker_progress(None, "wrote " + artifact, "") == artifact
+    assert resolve_worker_progress("", "ordinary response", "ordinary prompt") is None
+    assert resolve_worker_progress(None, "artifact: https://example.com/result", "") is None

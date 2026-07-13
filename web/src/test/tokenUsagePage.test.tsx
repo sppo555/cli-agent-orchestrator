@@ -92,4 +92,37 @@ describe('TokenUsagePage', () => {
     expect(screen.getByText('run-1')).toBeInTheDocument()
     expect(screen.getByText('term-1')).toBeInTheDocument()
   })
+
+  it('shows migration guidance and retries after an API error', async () => {
+    const list = vi.spyOn(tokenApi, 'listTokenUsagePage')
+      .mockRejectedValueOnce(new Error('500 Failed to summarize token usage: no such table: worker_token_usage'))
+      .mockResolvedValueOnce(page([]))
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary([]))
+    render(<TokenUsagePage />)
+
+    await waitFor(() => expect(screen.getByText('Token usage migration is missing.')).toBeInTheDocument())
+    expect(screen.getByText(/Restart the CAO server once/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Token usage migration is missing.')).not.toBeInTheDocument()
+  })
+
+  it('resets pagination state when a custom date range changes', async () => {
+    const list = vi.spyOn(tokenApi, 'listTokenUsagePage').mockResolvedValue(page())
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary())
+    render(<TokenUsagePage />)
+
+    await waitFor(() => expect(screen.getByText('2 attempts')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
+    fireEvent.change(screen.getByLabelText('Custom date from'), { target: { value: '2026-07-01' } })
+    fireEvent.change(screen.getByLabelText('Custom date to'), { target: { value: '2026-07-13' } })
+
+    await waitFor(() => {
+      const latest = list.mock.calls.at(-1)?.[0]
+      expect(latest?.from).toContain('2026-07-01')
+      expect(latest?.to).toContain('2026-07-14')
+      expect(latest?.cursor).toBeUndefined()
+      expect(latest?.snapshotAt).toBeUndefined()
+    })
+  })
 })
