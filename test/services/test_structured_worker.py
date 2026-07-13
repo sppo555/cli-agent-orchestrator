@@ -14,7 +14,7 @@ class _CodexCompletedProcess:
     returncode = 0
 
     async def communicate(self, input=None):
-        assert input == b"do it"
+        assert input is None
         return (
             b'{"type":"item.completed","item":{"type":"agent_message","text":"structured answer"}}\n'
             b'{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":12}}\n',
@@ -44,6 +44,7 @@ def test_codex_structured_worker_uses_jsonl_and_native_usage():
     assert result.token_usage.estimated is False
     assert result.token_usage.total_tokens == 52
     assert spawn.await_args.args[:3] == ("codex", "exec", "--json")
+    assert spawn.await_args.args[-1] == "do it"
     assert persist.call_args.kwargs["usage"].estimated is False
 
 
@@ -51,7 +52,7 @@ class _ClaudeCompletedProcess:
     returncode = 0
 
     async def communicate(self, input=None):
-        assert input == b"do it"
+        assert input is None
         return (
             b'{"type":"result","subtype":"success","result":"claude answer",'
             b'"usage":{"input_tokens":24,"output_tokens":8}}\n',
@@ -81,6 +82,7 @@ def test_claude_structured_worker_uses_json_result_and_native_usage():
     assert result.token_usage.estimated is False
     assert result.token_usage.total_tokens == 32
     assert spawn.await_args.args[:4] == ("claude", "-p", "--output-format", "json")
+    assert spawn.await_args.args[-1] == "do it"
     assert persist.call_args.kwargs["usage"].estimated is False
 
 

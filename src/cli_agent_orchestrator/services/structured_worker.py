@@ -98,6 +98,7 @@ async def run_structured_worker_step(
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
+            prompt,
             cwd=working_directory,
             env=environment,
             stdout=asyncio.subprocess.PIPE,
@@ -113,7 +114,7 @@ async def run_structured_worker_step(
     try:
         try:
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(input=prompt.encode("utf-8")),
+                process.communicate(),
                 timeout=timeout,
             )
         except asyncio.TimeoutError as exc:
