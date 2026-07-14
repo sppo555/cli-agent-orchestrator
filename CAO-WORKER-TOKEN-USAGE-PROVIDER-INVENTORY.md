@@ -1,11 +1,12 @@
-# CAO Worker Token Usage — Provider Inventory (4.17.5)
+# CAO Worker Token Usage — Provider Inventory (4.17.6)
 
-- Reviewed: 2026-07-13
+- Reviewed: 2026-07-15
 - Scope: structured and assign/interactive usage-source contract
-- Runtime status: new Claude Code and Codex assign/interactive turns use
-  provider-owned session/rollout usage; their structured adapters remain
-  native. Other providers remain estimated where a capture seam exists.
-- Native/provider-reported coverage: 2/9
+- Runtime status: new Claude Code, Codex, and Agy assign/interactive turns use
+  provider-owned session/rollout/conversation metadata. Claude and Codex
+  structured adapters remain native; Agy structured/print output has no usage
+  payload and retains estimated fallback.
+- Native/provider-reported coverage: 3/9 for assign/interactive; 2/9 for structured
 
 ## Evidence boundary
 
@@ -13,7 +14,8 @@ This inventory distinguishes three seams. Explicit structured worker mode
 consumes provider-owned machine-readable stdout. The legacy interactive
 `run_agent_step()` seam still estimates from its final message. The production
 non-blocking `assign` seam keeps its tmux lifecycle and now reads only usage
-metadata from the exact Claude session or Codex rollout owned by that worker.
+metadata from the exact Claude session, Codex rollout, or Agy conversation DB
+owned by that worker.
 
 No provider is marked native from a CLI name, a screen string, a model name, or
 an arbitrary number in ordinary response text. A native adapter requires a
@@ -32,7 +34,7 @@ boundary in 4.17.5.
 | `opencode_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `hermes` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `cursor_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
-| `antigravity_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
+| `antigravity_cli` | Assign/interactive sessions on Agy 1.1.x | `gen_metadata` protobuf counters in the conversation DB selected by Agy's terminal-specific cwd cache | Sum GenerationMetadata `input_tokens` and `output_tokens` rows created after the turn marker; total is their sum; inner Claude/Gemini model comes from the worker profile | Sanitized metadata-only protobuf fixtures for Claude Sonnet/Opus and Gemini Pro/Flash plus live Agy 1.1.2 evidence | Missing correlation, schema mismatch, malformed protobuf, SQLite failure, or zero delta returns `None` and retains estimated fallback | Read-only SQLite; decode only wrapper/schema discriminators and input/output integers; never decode or persist prompt, response, steps, tools, artifacts, or source path |
 
 ## Contract
 
@@ -51,9 +53,12 @@ The structured contract lives in
 turn correlation lives in `services/interactive_token_usage.py`. Claude uses a
 deterministic session UUID so concurrent workers in one cwd cannot cross. Codex
 binds the tmux pane's process tree to the rollout file it actually has open,
-then persists the cumulative delta for the completed turn. The older
+then persists the cumulative delta for the completed turn. Agy maps the pane's
+terminal-specific working directory through its own `last_conversations.json`
+cache, snapshots the maximum generation index, and reads only later token
+counters from that exact conversation DB. The older
 `run_agent_step()` interactive seam remains estimated, while production
-`assign` turns are native for these two providers.
+`assign` turns are native for these three providers.
 
 ## Durable write recovery
 

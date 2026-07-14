@@ -1,6 +1,9 @@
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from cli_agent_orchestrator.services import interactive_token_usage as interactive
 
@@ -42,6 +45,43 @@ def _codex_event(input_tokens: int, output_tokens: int):
             },
         },
     }
+
+
+def _varint(value: int) -> bytes:
+    encoded = bytearray()
+    while value >= 0x80:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def _protobuf_varint(field: int, value: int) -> bytes:
+    return _varint(field << 3) + _varint(value)
+
+
+def _protobuf_bytes(field: int, value: bytes) -> bytes:
+    return _varint((field << 3) | 2) + _varint(len(value)) + value
+
+
+def _agy_metadata(input_tokens: int, output_tokens: int) -> bytes:
+    # Sanitized Agy 1.1.x trajectory wrapper. No prompt/response payload exists
+    # in this fixture; only GenerationMetadata token counters are represented.
+    generation = b"".join(
+        (
+            _protobuf_varint(1, 123),  # provider latency; schema discriminator
+            _protobuf_varint(2, input_tokens),
+            _protobuf_varint(3, output_tokens),
+            _protobuf_varint(6, 24),  # provider model enum; schema discriminator
+        )
+    )
+    return _protobuf_bytes(1, _protobuf_bytes(4, generation))
+
+
+def _agy_database(path: Path, *rows: tuple[int, bytes]) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB)")
+        connection.executemany("INSERT INTO gen_metadata(idx, data) VALUES (?, ?)", rows)
 
 
 def test_claude_interactive_turn_sums_cache_input_and_deduplicates_messages(tmp_path):
@@ -112,6 +152,101 @@ def test_codex_interactive_turn_persists_cumulative_delta(tmp_path):
     assert usage.model == "gpt-5"
     assert usage.effort == "xhigh"
     persist.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "Claude Sonnet 4.6 (Thinking)",
+        "Claude Opus 4.6 (Thinking)",
+        "Gemini 3.1 Pro (High)",
+        "Gemini 3.5 Flash (Low)",
+    ],
+)
+def test_agy_interactive_turn_sums_native_generations_after_marker(tmp_path, model):
+    database = tmp_path / "conversation.db"
+    _agy_database(database, (0, _agy_metadata(100, 5)))
+    terminal_id = f"agy-{model}"
+
+    with patch.object(interactive, "_discover_agy_conversation", return_value=database):
+        assert interactive.begin_interactive_usage_turn(
+            terminal_id=terminal_id,
+            provider="antigravity_cli",
+            agent="developer_agy",
+            session_name="session",
+            window_name="window",
+            prompt="do the task",
+        )
+        with sqlite3.connect(database) as connection:
+            connection.executemany(
+                "INSERT INTO gen_metadata(idx, data) VALUES (?, ?)",
+                [(1, _agy_metadata(200, 11)), (2, _agy_metadata(300, 17))],
+            )
+        assert interactive.observe_interactive_usage_processing(terminal_id)
+        turn = interactive.claim_completed_interactive_usage_turn(terminal_id)
+        assert turn is not None
+        with (
+            patch.object(interactive, "persist_worker_token_usage") as persist,
+            patch.object(
+                interactive,
+                "resolve_worker_configuration",
+                return_value=(model, None),
+            ),
+        ):
+            usage = interactive.complete_interactive_usage_turn(turn)
+
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (500, 28, 528)
+    assert usage.estimated is False
+    assert usage.model == model
+    persist.assert_called_once()
+
+
+def test_agy_malformed_metadata_is_ignored_without_reading_payload(tmp_path):
+    database = tmp_path / "conversation.db"
+    _agy_database(
+        database,
+        (0, _agy_metadata(10, 2)),
+        (1, b"prompt and response bytes that are not protobuf"),
+        (2, _protobuf_bytes(1, _protobuf_bytes(4, _protobuf_varint(2, 99)))),
+    )
+    assert interactive._agy_totals_after(database, 0) is None
+
+
+def test_agy_missing_source_falls_back_instead_of_claiming_native_turn():
+    with patch.object(interactive, "_discover_agy_conversation", return_value=None):
+        assert not interactive.begin_interactive_usage_turn(
+            terminal_id="agy-missing",
+            provider="antigravity_cli",
+            agent="developer_agy",
+            session_name="session",
+            window_name="window",
+            prompt="task",
+        )
+    assert interactive.claim_completed_interactive_usage_turn("agy-missing") is None
+
+
+def test_agy_conversation_is_correlated_by_terminal_specific_working_directory(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    cache = home / ".gemini" / "antigravity-cli" / "cache"
+    conversations = home / ".gemini" / "antigravity-cli" / "conversations"
+    cache.mkdir(parents=True)
+    conversations.mkdir(parents=True)
+    expected = conversations / "conversation-1.db"
+    expected.touch()
+    (cache / "last_conversations.json").write_text(
+        json.dumps({"/tmp/agy-workspaces/terminal-1": "conversation-1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    with patch.object(
+        interactive,
+        "_pane_working_directory",
+        return_value="/tmp/agy-workspaces/terminal-1",
+    ):
+        assert interactive._discover_agy_conversation("session", "window") == expected
 
 
 def test_second_input_while_busy_does_not_reset_native_baseline(tmp_path):

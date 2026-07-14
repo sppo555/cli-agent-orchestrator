@@ -1,20 +1,23 @@
-"""Native token accounting for interactive Claude Code and Codex turns.
+"""Native token accounting for interactive Claude Code, Codex, and Agy turns.
 
 The normal CAO ``assign`` path keeps workers in interactive tmux terminals.  It
 therefore cannot consume the structured stdout used by ``structured_worker``.
 This module bridges that gap without scraping terminal text: it reads only the
-provider-owned usage fields in Claude session JSONL and Codex rollout JSONL.
-Prompt, response, tool payload, and transcript content are never persisted.
+provider-owned usage fields in Claude session JSONL, Codex rollout JSONL, and
+Agy conversation metadata. Prompt, response, tool payload, and transcript
+content are never persisted.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import subprocess
 import threading
 import time
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +35,7 @@ logger = logging.getLogger(__name__)
 _NATIVE_INTERACTIVE_PROVIDERS = {
     ProviderType.CLAUDE_CODE.value,
     ProviderType.CODEX.value,
+    ProviderType.ANTIGRAVITY_CLI.value,
 }
 _CAPTURE_RETRY_DELAYS = (0.0, 0.2, 0.5)
 
@@ -64,6 +68,7 @@ class InteractiveUsageTurn:
 _lock = threading.RLock()
 _active_turns: dict[str, InteractiveUsageTurn] = {}
 _codex_sources: dict[str, Path] = {}
+_agy_sources: dict[str, Path] = {}
 _processing_observed: set[str] = set()
 _capture_in_flight: set[str] = set()
 
@@ -176,6 +181,185 @@ def _discover_codex_rollout(session_name: str, window_name: str) -> Optional[Pat
         return max(candidates, key=lambda path: path.stat().st_mtime_ns)
     except OSError:
         return None
+
+
+def _pane_working_directory(session_name: str, window_name: str) -> Optional[str]:
+    target = f"{session_name}:{window_name}"
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", target, "#{pane_current_path}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    working_directory = result.stdout.strip()
+    return working_directory or None
+
+
+def _discover_agy_conversation(session_name: str, window_name: str) -> Optional[Path]:
+    """Resolve the conversation DB from Agy's cwd-to-conversation cache.
+
+    CAO launches every Agy worker in a terminal-specific workspace directory.
+    Agy owns the cache mapping that directory to its active conversation id,
+    which is a stronger correlation boundary than timestamps or shared source
+    repository paths.
+    """
+
+    working_directory = _pane_working_directory(session_name, window_name)
+    if working_directory is None:
+        return None
+    cache = Path.home() / ".gemini" / "antigravity-cli" / "cache" / "last_conversations.json"
+    try:
+        mapping = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(mapping, dict):
+        return None
+    conversation_id = mapping.get(working_directory)
+    if (
+        not isinstance(conversation_id, str)
+        or not conversation_id
+        or Path(conversation_id).name != conversation_id
+    ):
+        return None
+    source = Path.home() / ".gemini" / "antigravity-cli" / "conversations" / f"{conversation_id}.db"
+    return source if source.is_file() else None
+
+
+def _protobuf_varint(data: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    for shift in range(0, 70, 7):
+        if offset >= len(data):
+            raise ValueError("truncated protobuf varint")
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, offset
+    raise ValueError("protobuf varint exceeds 64 bits")
+
+
+def _protobuf_fields(data: bytes) -> dict[int, list[int | bytes]]:
+    """Decode only protobuf wire primitives needed by Agy metadata."""
+
+    fields: dict[int, list[int | bytes]] = {}
+    offset = 0
+    while offset < len(data):
+        tag, offset = _protobuf_varint(data, offset)
+        field_number, wire_type = tag >> 3, tag & 7
+        if field_number <= 0:
+            raise ValueError("invalid protobuf field")
+        if wire_type == 0:
+            value, offset = _protobuf_varint(data, offset)
+        elif wire_type == 1:
+            if offset + 8 > len(data):
+                raise ValueError("truncated protobuf fixed64")
+            value = data[offset : offset + 8]
+            offset += 8
+        elif wire_type == 2:
+            size, offset = _protobuf_varint(data, offset)
+            if size < 0 or offset + size > len(data):
+                raise ValueError("truncated protobuf bytes")
+            value = data[offset : offset + size]
+            offset += size
+        elif wire_type == 5:
+            if offset + 4 > len(data):
+                raise ValueError("truncated protobuf fixed32")
+            value = data[offset : offset + 4]
+            offset += 4
+        else:
+            raise ValueError("unsupported protobuf wire type")
+        fields.setdefault(field_number, []).append(value)
+    return fields
+
+
+def _agy_generation_totals(data: bytes) -> Optional[_TokenTotals]:
+    """Read Agy GenerationMetadata.input_tokens/output_tokens only.
+
+    Agy 1.1.x stores a trajectory wrapper at field 1 and its generation
+    metadata at wrapper field 4. GenerationMetadata fields 2 and 3 are the
+    provider-reported input and output counters. Other fields and all payload
+    content are deliberately ignored.
+    """
+
+    try:
+        root = _protobuf_fields(data)
+        totals: list[_TokenTotals] = []
+        for wrapper_raw in root.get(1, ()):
+            if not isinstance(wrapper_raw, bytes):
+                continue
+            wrapper = _protobuf_fields(wrapper_raw)
+            for generation_raw in wrapper.get(4, ()):
+                if not isinstance(generation_raw, bytes):
+                    continue
+                generation = _protobuf_fields(generation_raw)
+                latency = next(
+                    (value for value in generation.get(1, ()) if isinstance(value, int)),
+                    None,
+                )
+                input_tokens = next(
+                    (value for value in generation.get(2, ()) if isinstance(value, int)),
+                    None,
+                )
+                output_tokens = next(
+                    (value for value in generation.get(3, ()) if isinstance(value, int)),
+                    None,
+                )
+                model_enum = next(
+                    (value for value in generation.get(6, ()) if isinstance(value, int)),
+                    None,
+                )
+                if (
+                    latency is None
+                    or input_tokens is None
+                    or output_tokens is None
+                    or model_enum is None
+                    or input_tokens <= 0
+                ):
+                    continue
+                totals.append(_TokenTotals(input_tokens, output_tokens))
+    except (TypeError, ValueError):
+        return None
+    if not totals:
+        return None
+    return _TokenTotals(
+        input_tokens=sum(item.input_tokens for item in totals),
+        output_tokens=sum(item.output_tokens for item in totals),
+    )
+
+
+def _agy_last_generation_index(path: Path) -> Optional[int]:
+    try:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as connection:
+            row = connection.execute("SELECT MAX(idx) FROM gen_metadata").fetchone()
+    except (OSError, sqlite3.Error):
+        return None
+    return row[0] if row and isinstance(row[0], int) else -1
+
+
+def _agy_totals_after(path: Path, marker: int) -> Optional[_TokenTotals]:
+    try:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as connection:
+            rows = connection.execute(
+                "SELECT data FROM gen_metadata WHERE idx > ? ORDER BY idx",
+                (marker,),
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return None
+    totals = [
+        parsed
+        for (data,) in rows
+        if isinstance(data, bytes) and (parsed := _agy_generation_totals(data)) is not None
+    ]
+    if not totals:
+        return None
+    return _TokenTotals(
+        input_tokens=sum(item.input_tokens for item in totals),
+        output_tokens=sum(item.output_tokens for item in totals),
+    )
 
 
 def _read_jsonl_from(path: Path, offset: int = 0) -> list[dict[str, Any]]:
@@ -301,13 +485,24 @@ def begin_interactive_usage_turn(
                 marker = source_path.stat().st_size if source_path is not None else 0
             except OSError:
                 marker = 0
-        else:
+        elif provider == ProviderType.CODEX.value:
             source_path = _codex_sources.get(terminal_id)
             if source_path is None or not source_path.exists():
                 source_path = _discover_codex_rollout(session_name, window_name)
                 if source_path is not None:
                     _codex_sources[terminal_id] = source_path
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
+        else:
+            source_path = _agy_sources.get(terminal_id)
+            if source_path is None or not source_path.exists():
+                source_path = _discover_agy_conversation(session_name, window_name)
+                if source_path is not None:
+                    _agy_sources[terminal_id] = source_path
+            if source_path is None:
+                return False
+            marker = _agy_last_generation_index(source_path)
+            if marker is None:
+                return False
 
         _active_turns[terminal_id] = InteractiveUsageTurn(
             terminal_id=terminal_id,
@@ -384,6 +579,7 @@ def clear_interactive_usage_terminal(terminal_id: str) -> None:
     with _lock:
         _active_turns.pop(terminal_id, None)
         _codex_sources.pop(terminal_id, None)
+        _agy_sources.pop(terminal_id, None)
         _processing_observed.discard(terminal_id)
         _capture_in_flight.discard(terminal_id)
 
@@ -395,7 +591,7 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
         if source_path is None:
             return None
         totals = _claude_totals(source_path, int(turn.marker or 0))
-    else:
+    elif turn.provider == ProviderType.CODEX.value:
         if source_path is None or not source_path.exists():
             source_path = _discover_codex_rollout(turn.session_name, turn.window_name)
         if source_path is None:
@@ -409,6 +605,11 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
         if input_tokens < 0 or output_tokens < 0:
             return None
         totals = _TokenTotals(input_tokens=input_tokens, output_tokens=output_tokens)
+    else:
+        if source_path is None or not source_path.exists():
+            return None
+        marker = turn.marker if isinstance(turn.marker, int) else -1
+        totals = _agy_totals_after(source_path, marker)
 
     if totals is None or totals.total_tokens <= 0:
         return None
