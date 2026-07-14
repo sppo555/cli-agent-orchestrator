@@ -65,6 +65,7 @@ def test_claude_interactive_turn_sums_cache_input_and_deduplicates_messages(tmp_
             first,  # Claude can journal the same API message more than once.
             _claude_event("msg-2", uncached=3, created=40, read=500, output=6),
         )
+        assert interactive.observe_interactive_usage_processing("claude-1")
         turn = interactive.claim_completed_interactive_usage_turn("claude-1")
         assert turn is not None
         with patch.object(interactive, "persist_worker_token_usage") as persist:
@@ -94,6 +95,7 @@ def test_codex_interactive_turn_persists_cumulative_delta(tmp_path):
             prompt="do the task",
         )
         _write(log, _codex_event(170, 14))
+        assert interactive.observe_interactive_usage_processing("codex-1")
         turn = interactive.claim_completed_interactive_usage_turn("codex-1")
         assert turn is not None
         with (
@@ -145,6 +147,82 @@ def test_unknown_provider_is_not_claimed():
         prompt="task",
     )
     assert interactive.claim_completed_interactive_usage_turn("kiro-1") is None
+
+
+def test_stale_ready_edge_cannot_claim_before_new_processing(tmp_path):
+    log = tmp_path / "rollout-test.jsonl"
+    _write(log, _codex_event(10, 2))
+    with patch.object(interactive, "_discover_codex_rollout", return_value=log):
+        assert interactive.begin_interactive_usage_turn(
+            terminal_id="codex-race",
+            provider="codex",
+            agent="developer",
+            session_name="session",
+            window_name="window",
+            prompt="task",
+        )
+
+    assert interactive.claim_completed_interactive_usage_turn("codex-race") is None
+    assert interactive.observe_interactive_usage_processing("codex-race")
+    assert interactive.claim_completed_interactive_usage_turn("codex-race") is not None
+    interactive.clear_interactive_usage_terminal("codex-race")
+
+
+def test_zero_delta_releases_claim_and_real_completion_consumes_marker(tmp_path):
+    log = tmp_path / "rollout-test.jsonl"
+    _write(log, _codex_event(100, 5))
+    with patch.object(interactive, "_discover_codex_rollout", return_value=log):
+        assert interactive.begin_interactive_usage_turn(
+            terminal_id="codex-premature",
+            provider="codex",
+            agent="developer",
+            session_name="session",
+            window_name="window",
+            prompt="task",
+        )
+    assert interactive.observe_interactive_usage_processing("codex-premature")
+
+    premature = interactive.claim_completed_interactive_usage_turn("codex-premature")
+    assert premature is not None
+    assert interactive.claim_completed_interactive_usage_turn("codex-premature") is None
+    with (
+        patch.object(interactive, "persist_worker_token_usage") as persist,
+        patch.object(interactive, "_CAPTURE_RETRY_DELAYS", (0.0,)),
+    ):
+        assert interactive.complete_interactive_usage_turn(premature) is None
+        persist.assert_not_called()
+
+        _write(log, _codex_event(175, 14))
+        completed = interactive.claim_completed_interactive_usage_turn("codex-premature")
+        assert completed is premature
+        usage = interactive.complete_interactive_usage_turn(completed)
+
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (75, 9, 84)
+    assert interactive.claim_completed_interactive_usage_turn("codex-premature") is None
+    persist.assert_called_once()
+
+
+def test_terminal_finalize_flushes_active_turn_without_another_status_edge(tmp_path):
+    log = tmp_path / "claude.jsonl"
+    log.touch()
+    with patch.object(interactive, "_claude_source_path", return_value=log):
+        assert interactive.begin_interactive_usage_turn(
+            terminal_id="claude-delete",
+            provider="claude_code",
+            agent="reviewer",
+            session_name="session",
+            window_name="window",
+            prompt="review",
+        )
+        _write(log, _claude_event("done", uncached=3, created=20, read=300, output=9))
+        with patch.object(interactive, "persist_worker_token_usage") as persist:
+            usage = interactive.finalize_interactive_usage_terminal("claude-delete")
+
+    assert usage is not None
+    assert usage.total_tokens == 332
+    persist.assert_called_once()
+    assert interactive.claim_completed_interactive_usage_turn("claude-delete") is None
 
 
 def test_codex_source_is_correlated_from_pane_process_open_file(tmp_path):

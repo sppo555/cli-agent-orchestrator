@@ -453,10 +453,14 @@ class StatusMonitor:
             cancel_interactive_usage_turn,
             claim_completed_interactive_usage_turn,
             complete_interactive_usage_turn,
+            observe_interactive_usage_processing,
         )
 
         if detected == TerminalStatus.ERROR:
             cancel_interactive_usage_turn(terminal_id)
+            return
+        if detected == TerminalStatus.PROCESSING:
+            observe_interactive_usage_processing(terminal_id)
             return
         if detected not in {TerminalStatus.IDLE, TerminalStatus.COMPLETED}:
             return

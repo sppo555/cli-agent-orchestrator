@@ -1235,6 +1235,10 @@ class TestGetOutput:
 class TestDeleteTerminal:
     """Tests for delete_terminal function."""
 
+    @patch(
+        "cli_agent_orchestrator.services.interactive_token_usage."
+        "finalize_interactive_usage_terminal"
+    )
     @patch("cli_agent_orchestrator.services.terminal_service.status_monitor")
     @patch("cli_agent_orchestrator.services.terminal_service.fifo_manager")
     @patch("cli_agent_orchestrator.services.terminal_service.db_delete_terminal")
@@ -1249,6 +1253,7 @@ class TestDeleteTerminal:
         mock_db_delete,
         mock_fifo_manager,
         mock_status_monitor,
+        finalize_usage,
     ):
         """Test deleting terminal successfully."""
         mock_get_metadata.return_value = {
@@ -1261,6 +1266,7 @@ class TestDeleteTerminal:
 
         assert result is True
         mock_tmux.stop_pipe_pane.assert_called_once()
+        finalize_usage.assert_called_once_with("test1234")
         mock_provider_manager.cleanup_provider.assert_called_once_with("test1234")
 
     @patch("cli_agent_orchestrator.services.terminal_service.status_monitor")

@@ -64,6 +64,8 @@ class InteractiveUsageTurn:
 _lock = threading.RLock()
 _active_turns: dict[str, InteractiveUsageTurn] = {}
 _codex_sources: dict[str, Path] = {}
+_processing_observed: set[str] = set()
+_capture_in_flight: set[str] = set()
 
 
 def claude_usage_session_id(terminal_id: str, session_name: str, window_name: str) -> str:
@@ -317,6 +319,18 @@ def begin_interactive_usage_turn(
             source_path=source_path,
             marker=marker,
         )
+        _processing_observed.discard(terminal_id)
+        _capture_in_flight.discard(terminal_id)
+        return True
+
+
+def observe_interactive_usage_processing(terminal_id: str) -> bool:
+    """Arm completion only after this active turn reaches PROCESSING."""
+
+    with _lock:
+        if terminal_id not in _active_turns:
+            return False
+        _processing_observed.add(terminal_id)
         return True
 
 
@@ -325,19 +339,53 @@ def cancel_interactive_usage_turn(terminal_id: str) -> None:
 
     with _lock:
         _active_turns.pop(terminal_id, None)
+        _processing_observed.discard(terminal_id)
+        _capture_in_flight.discard(terminal_id)
 
 
 def claim_completed_interactive_usage_turn(terminal_id: str) -> Optional[InteractiveUsageTurn]:
-    """Atomically detach a completed marker before asynchronous persistence."""
+    """Reserve an eligible completed marker for asynchronous persistence.
+
+    The marker stays active until provider usage is actually found and
+    persisted.  A stale ready edge can therefore produce a zero delta without
+    consuming the real turn that completes later.
+    """
 
     with _lock:
-        return _active_turns.pop(terminal_id, None)
+        if terminal_id not in _processing_observed or terminal_id in _capture_in_flight:
+            return None
+        turn = _active_turns.get(terminal_id)
+        if turn is None:
+            return None
+        _capture_in_flight.add(terminal_id)
+        return turn
+
+
+def _finish_interactive_usage_claim(turn: InteractiveUsageTurn, *, consumed: bool) -> None:
+    with _lock:
+        _capture_in_flight.discard(turn.terminal_id)
+        if consumed and _active_turns.get(turn.terminal_id) is turn:
+            _active_turns.pop(turn.terminal_id, None)
+            _processing_observed.discard(turn.terminal_id)
+
+
+def finalize_interactive_usage_terminal(terminal_id: str) -> Optional[TokenUsage]:
+    """Flush an active native turn before its terminal/provider is destroyed."""
+
+    with _lock:
+        turn = _active_turns.get(terminal_id)
+        if turn is None or terminal_id in _capture_in_flight:
+            return None
+        _capture_in_flight.add(terminal_id)
+    return complete_interactive_usage_turn(turn)
 
 
 def clear_interactive_usage_terminal(terminal_id: str) -> None:
     with _lock:
         _active_turns.pop(terminal_id, None)
         _codex_sources.pop(terminal_id, None)
+        _processing_observed.discard(terminal_id)
+        _capture_in_flight.discard(terminal_id)
 
 
 def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
@@ -388,8 +436,9 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
             if usage is not None:
                 break
         if usage is None:
+            _finish_interactive_usage_claim(turn, consumed=False)
             logger.warning(
-                "No native interactive usage found for %s terminal %s; record omitted",
+                "No native interactive usage found for %s terminal %s; marker retained",
                 turn.provider,
                 turn.terminal_id,
             )
@@ -401,7 +450,9 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
             usage=usage,
             progress=turn.progress,
         )
+        _finish_interactive_usage_claim(turn, consumed=True)
         return usage
     except Exception:  # noqa: BLE001 - observability must never break worker completion
+        _finish_interactive_usage_claim(turn, consumed=False)
         logger.exception("Failed to capture native interactive usage for %s", turn.terminal_id)
         return None

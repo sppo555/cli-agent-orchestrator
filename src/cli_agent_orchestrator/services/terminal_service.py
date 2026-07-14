@@ -1077,6 +1077,19 @@ def delete_terminal(terminal_id: str, registry: PluginRegistry | None = None) ->
             except Exception as e:
                 logger.warning(f"Failed to stop FIFO reader for {terminal_id}: {e}")
 
+            # A supervisor may delete a worker immediately after receiving its
+            # completion message, before another status edge can flush native
+            # usage. Read the provider-owned log while the pane and provider
+            # correlation data still exist. Failure must not block teardown.
+            try:
+                from cli_agent_orchestrator.services.interactive_token_usage import (
+                    finalize_interactive_usage_terminal,
+                )
+
+                finalize_interactive_usage_terminal(terminal_id)
+            except Exception as e:
+                logger.warning(f"Failed to finalize native usage for {terminal_id}: {e}")
+
             # Clear state detector buffers for this terminal
             try:
                 status_monitor.clear_terminal(terminal_id)

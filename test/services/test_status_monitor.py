@@ -182,6 +182,22 @@ class TestGetStatusTmux:
 
         sm._schedule_native_usage_capture.assert_called_once_with("t1", TerminalStatus.COMPLETED)
 
+    def test_native_usage_requires_processing_before_completed_claim(self):
+        sm = StatusMonitor()
+        module = "cli_agent_orchestrator.services.interactive_token_usage"
+        with (
+            patch(f"{module}.observe_interactive_usage_processing") as observe,
+            patch(f"{module}.claim_completed_interactive_usage_turn") as claim,
+        ):
+            sm._schedule_native_usage_capture("t1", TerminalStatus.COMPLETED)
+            claim.assert_called_once_with("t1")
+            observe.assert_not_called()
+
+            claim.reset_mock()
+            sm._schedule_native_usage_capture("t1", TerminalStatus.PROCESSING)
+            observe.assert_called_once_with("t1")
+            claim.assert_not_called()
+
 
 class TestGetStatusEventInbox:
     """Event-inbox backend (herdr): derive status on demand from the provider."""
