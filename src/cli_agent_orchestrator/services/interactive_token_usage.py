@@ -52,6 +52,13 @@ class _TokenTotals:
 
 
 @dataclass(frozen=True)
+class _AgyMarker:
+    workspace: str
+    snapshot_ns: int
+    source_indexes: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
 class InteractiveUsageTurn:
     """A claimed interactive turn, safe to finish off the event loop."""
 
@@ -68,7 +75,6 @@ class InteractiveUsageTurn:
 _lock = threading.RLock()
 _active_turns: dict[str, InteractiveUsageTurn] = {}
 _codex_sources: dict[str, Path] = {}
-_agy_sources: dict[str, Path] = {}
 _processing_observed: set[str] = set()
 _capture_in_flight: set[str] = set()
 
@@ -199,34 +205,18 @@ def _pane_working_directory(session_name: str, window_name: str) -> Optional[str
     return working_directory or None
 
 
-def _discover_agy_conversation(session_name: str, window_name: str) -> Optional[Path]:
-    """Resolve the conversation DB from Agy's cwd-to-conversation cache.
-
-    CAO launches every Agy worker in a terminal-specific workspace directory.
-    Agy owns the cache mapping that directory to its active conversation id,
-    which is a stronger correlation boundary than timestamps or shared source
-    repository paths.
-    """
-
+def _agy_isolated_workspace(session_name: str, window_name: str) -> Optional[str]:
     working_directory = _pane_working_directory(session_name, window_name)
     if working_directory is None:
         return None
-    cache = Path.home() / ".gemini" / "antigravity-cli" / "cache" / "last_conversations.json"
+    workspace = Path(working_directory)
+    isolation_root = Path.home() / ".cache" / "cao" / "agy-workspaces"
     try:
-        mapping = json.loads(cache.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError):
+        workspace.relative_to(isolation_root)
+    except ValueError:
+        # A shared repository cwd is ambiguous when Agy workers run in parallel.
         return None
-    if not isinstance(mapping, dict):
-        return None
-    conversation_id = mapping.get(working_directory)
-    if (
-        not isinstance(conversation_id, str)
-        or not conversation_id
-        or Path(conversation_id).name != conversation_id
-    ):
-        return None
-    source = Path.home() / ".gemini" / "antigravity-cli" / "conversations" / f"{conversation_id}.db"
-    return source if source.is_file() else None
+    return str(workspace)
 
 
 def _protobuf_varint(data: bytes, offset: int) -> tuple[int, int]:
@@ -340,6 +330,56 @@ def _agy_last_generation_index(path: Path) -> Optional[int]:
     return row[0] if row and isinstance(row[0], int) else -1
 
 
+def _agy_source_matches_workspace(path: Path, workspace: str) -> bool:
+    workspace_uri = f"file://{workspace}".encode()
+    try:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as connection:
+            row = connection.execute(
+                "SELECT 1 FROM trajectory_metadata_blob " "WHERE instr(data, ?) > 0 LIMIT 1",
+                (workspace_uri,),
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return False
+    return row is not None
+
+
+def _agy_conversation_sources(
+    workspace: str, *, modified_after_ns: Optional[int] = None
+) -> list[Path]:
+    conversations = Path.home() / ".gemini" / "antigravity-cli" / "conversations"
+    try:
+        candidates = list(conversations.glob("*.db"))
+    except OSError:
+        return []
+    sources: list[Path] = []
+    for path in candidates:
+        if modified_after_ns is not None:
+            try:
+                if path.stat().st_mtime_ns < modified_after_ns:
+                    continue
+            except OSError:
+                continue
+        if _agy_source_matches_workspace(path, workspace):
+            sources.append(path)
+    return sources
+
+
+def _agy_turn_marker(session_name: str, window_name: str) -> Optional[_AgyMarker]:
+    workspace = _agy_isolated_workspace(session_name, window_name)
+    if workspace is None:
+        return None
+    source_indexes: list[tuple[str, int]] = []
+    for source in _agy_conversation_sources(workspace):
+        index = _agy_last_generation_index(source)
+        if index is not None:
+            source_indexes.append((str(source), index))
+    return _AgyMarker(
+        workspace=workspace,
+        snapshot_ns=time.time_ns(),
+        source_indexes=tuple(source_indexes),
+    )
+
+
 def _agy_totals_after(path: Path, marker: int) -> Optional[_TokenTotals]:
     try:
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as connection:
@@ -353,6 +393,26 @@ def _agy_totals_after(path: Path, marker: int) -> Optional[_TokenTotals]:
         parsed
         for (data,) in rows
         if isinstance(data, bytes) and (parsed := _agy_generation_totals(data)) is not None
+    ]
+    if not totals:
+        return None
+    return _TokenTotals(
+        input_tokens=sum(item.input_tokens for item in totals),
+        output_tokens=sum(item.output_tokens for item in totals),
+    )
+
+
+def _agy_totals_for_turn(marker: _AgyMarker) -> Optional[_TokenTotals]:
+    baselines = {Path(path): index for path, index in marker.source_indexes}
+    recent = _agy_conversation_sources(
+        marker.workspace,
+        modified_after_ns=max(0, marker.snapshot_ns - 1_000_000_000),
+    )
+    sources = set(recent) | set(baselines)
+    totals = [
+        parsed
+        for source in sources
+        if (parsed := _agy_totals_after(source, baselines.get(source, -1))) is not None
     ]
     if not totals:
         return None
@@ -493,14 +553,8 @@ def begin_interactive_usage_turn(
                     _codex_sources[terminal_id] = source_path
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
         else:
-            source_path = _agy_sources.get(terminal_id)
-            if source_path is None or not source_path.exists():
-                source_path = _discover_agy_conversation(session_name, window_name)
-                if source_path is not None:
-                    _agy_sources[terminal_id] = source_path
-            if source_path is None:
-                return False
-            marker = _agy_last_generation_index(source_path)
+            source_path = None
+            marker = _agy_turn_marker(session_name, window_name)
             if marker is None:
                 return False
 
@@ -579,7 +633,6 @@ def clear_interactive_usage_terminal(terminal_id: str) -> None:
     with _lock:
         _active_turns.pop(terminal_id, None)
         _codex_sources.pop(terminal_id, None)
-        _agy_sources.pop(terminal_id, None)
         _processing_observed.discard(terminal_id)
         _capture_in_flight.discard(terminal_id)
 
@@ -606,10 +659,9 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
             return None
         totals = _TokenTotals(input_tokens=input_tokens, output_tokens=output_tokens)
     else:
-        if source_path is None or not source_path.exists():
+        if not isinstance(turn.marker, _AgyMarker):
             return None
-        marker = turn.marker if isinstance(turn.marker, int) else -1
-        totals = _agy_totals_after(source_path, marker)
+        totals = _agy_totals_for_turn(turn.marker)
 
     if totals is None or totals.total_tokens <= 0:
         return None

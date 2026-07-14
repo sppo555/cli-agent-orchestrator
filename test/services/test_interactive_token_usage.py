@@ -78,10 +78,16 @@ def _agy_metadata(input_tokens: int, output_tokens: int) -> bytes:
     return _protobuf_bytes(1, _protobuf_bytes(4, generation))
 
 
-def _agy_database(path: Path, *rows: tuple[int, bytes]) -> None:
+def _agy_database(path: Path, *rows: tuple[int, bytes], workspace: str | None = None) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB)")
         connection.executemany("INSERT INTO gen_metadata(idx, data) VALUES (?, ?)", rows)
+        connection.execute("CREATE TABLE trajectory_metadata_blob (id TEXT, data BLOB)")
+        if workspace is not None:
+            connection.execute(
+                "INSERT INTO trajectory_metadata_blob(id, data) VALUES ('main', ?)",
+                (f"metadata:file://{workspace}".encode(),),
+            )
 
 
 def test_claude_interactive_turn_sums_cache_input_and_deduplicates_messages(tmp_path):
@@ -167,8 +173,16 @@ def test_agy_interactive_turn_sums_native_generations_after_marker(tmp_path, mod
     database = tmp_path / "conversation.db"
     _agy_database(database, (0, _agy_metadata(100, 5)))
     terminal_id = f"agy-{model}"
+    marker = interactive._AgyMarker(
+        workspace="/tmp/agy-workspaces/terminal-1",
+        snapshot_ns=1,
+        source_indexes=((str(database), 0),),
+    )
 
-    with patch.object(interactive, "_discover_agy_conversation", return_value=database):
+    with (
+        patch.object(interactive, "_agy_turn_marker", return_value=marker),
+        patch.object(interactive, "_agy_conversation_sources", return_value=[database]),
+    ):
         assert interactive.begin_interactive_usage_turn(
             terminal_id=terminal_id,
             provider="antigravity_cli",
@@ -214,7 +228,7 @@ def test_agy_malformed_metadata_is_ignored_without_reading_payload(tmp_path):
 
 
 def test_agy_missing_source_falls_back_instead_of_claiming_native_turn():
-    with patch.object(interactive, "_discover_agy_conversation", return_value=None):
+    with patch.object(interactive, "_agy_turn_marker", return_value=None):
         assert not interactive.begin_interactive_usage_turn(
             terminal_id="agy-missing",
             provider="antigravity_cli",
@@ -226,27 +240,76 @@ def test_agy_missing_source_falls_back_instead_of_claiming_native_turn():
     assert interactive.claim_completed_interactive_usage_turn("agy-missing") is None
 
 
-def test_agy_conversation_is_correlated_by_terminal_specific_working_directory(
-    tmp_path, monkeypatch
-):
+def test_agy_conversation_is_correlated_by_terminal_specific_working_directory(tmp_path):
     home = tmp_path / "home"
-    cache = home / ".gemini" / "antigravity-cli" / "cache"
     conversations = home / ".gemini" / "antigravity-cli" / "conversations"
-    cache.mkdir(parents=True)
     conversations.mkdir(parents=True)
     expected = conversations / "conversation-1.db"
-    expected.touch()
-    (cache / "last_conversations.json").write_text(
-        json.dumps({"/tmp/agy-workspaces/terminal-1": "conversation-1"}),
-        encoding="utf-8",
+    workspace = home / ".cache" / "cao" / "agy-workspaces" / "terminal-1"
+    _agy_database(
+        expected,
+        (0, _agy_metadata(10, 2)),
+        workspace=str(workspace),
     )
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    with patch.object(
-        interactive,
-        "_pane_working_directory",
-        return_value="/tmp/agy-workspaces/terminal-1",
+    unrelated = conversations / "conversation-2.db"
+    _agy_database(
+        unrelated,
+        (0, _agy_metadata(20, 3)),
+        workspace="/different/workspace",
+    )
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.object(interactive, "_pane_working_directory", return_value=str(workspace)),
     ):
-        assert interactive._discover_agy_conversation("session", "window") == expected
+        marker = interactive._agy_turn_marker("session", "window")
+    assert marker is not None
+    assert marker.workspace == str(workspace)
+    assert marker.source_indexes == ((str(expected), 0),)
+
+
+def test_agy_shared_working_directory_keeps_estimated_fallback(tmp_path):
+    home = tmp_path / "home"
+    shared_workspace = home / "Developer" / "repository"
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.object(
+            interactive,
+            "_pane_working_directory",
+            return_value=str(shared_workspace),
+        ),
+    ):
+        assert interactive._agy_turn_marker("session", "window") is None
+
+
+def test_agy_completion_finds_new_matching_db_and_ignores_concurrent_worker(tmp_path):
+    home = tmp_path / "home"
+    conversations = home / ".gemini" / "antigravity-cli" / "conversations"
+    conversations.mkdir(parents=True)
+    workspace = home / ".cache" / "cao" / "agy-workspaces" / "terminal-1"
+    other_workspace = home / ".cache" / "cao" / "agy-workspaces" / "terminal-2"
+    marker = interactive._AgyMarker(
+        workspace=str(workspace),
+        snapshot_ns=0,
+        source_indexes=(),
+    )
+    expected = conversations / "new-matching.db"
+    _agy_database(
+        expected,
+        (0, _agy_metadata(123, 7)),
+        workspace=str(workspace),
+    )
+    unrelated = conversations / "new-unrelated.db"
+    _agy_database(
+        unrelated,
+        (0, _agy_metadata(999, 99)),
+        workspace=str(other_workspace),
+    )
+
+    with patch.object(Path, "home", return_value=home):
+        totals = interactive._agy_totals_for_turn(marker)
+
+    assert totals is not None
+    assert (totals.input_tokens, totals.output_tokens) == (123, 7)
 
 
 def test_second_input_while_busy_does_not_reset_native_baseline(tmp_path):

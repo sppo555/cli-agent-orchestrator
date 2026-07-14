@@ -34,7 +34,7 @@ boundary in 4.17.5.
 | `opencode_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `hermes` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `cursor_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
-| `antigravity_cli` | Assign/interactive sessions on Agy 1.1.x | `gen_metadata` protobuf counters in the conversation DB selected by Agy's terminal-specific cwd cache | Sum GenerationMetadata `input_tokens` and `output_tokens` rows created after the turn marker; total is their sum; inner Claude/Gemini model comes from the worker profile | Sanitized metadata-only protobuf fixtures for Claude Sonnet/Opus and Gemini Pro/Flash plus live Agy 1.1.2 evidence | Missing correlation, schema mismatch, malformed protobuf, SQLite failure, or zero delta returns `None` and retains estimated fallback | Read-only SQLite; decode only wrapper/schema discriminators and input/output integers; never decode or persist prompt, response, steps, tools, artifacts, or source path |
+| `antigravity_cli` | Assign/interactive sessions on Agy 1.1.x launched in CAO's isolated Agy workspace | `gen_metadata` protobuf counters from conversation DBs whose trajectory metadata contains that terminal-specific workspace URI | Snapshot each matching DB's maximum generation index, then sum GenerationMetadata `input_tokens` and `output_tokens` rows created after the marker; total is their sum; inner Claude/Gemini model comes from the worker profile | Sanitized metadata-only protobuf fixtures for Claude Sonnet/Opus and Gemini Pro/Flash plus live Agy 1.1.2 evidence | Shared cwd, missing correlation, schema mismatch, malformed protobuf, SQLite failure, or zero delta returns `None` and retains estimated fallback | Read-only SQLite; inspect the workspace URI only for correlation and decode only wrapper/schema discriminators and input/output integers; never decode or persist prompt, response, steps, tools, artifacts, or source path |
 
 ## Contract
 
@@ -53,10 +53,12 @@ The structured contract lives in
 turn correlation lives in `services/interactive_token_usage.py`. Claude uses a
 deterministic session UUID so concurrent workers in one cwd cannot cross. Codex
 binds the tmux pane's process tree to the rollout file it actually has open,
-then persists the cumulative delta for the completed turn. Agy maps the pane's
-terminal-specific working directory through its own `last_conversations.json`
-cache, snapshots the maximum generation index, and reads only later token
-counters from that exact conversation DB. The older
+then persists the cumulative delta for the completed turn. Agy accepts native
+capture only when the pane runs below CAO's terminal-specific isolated Agy
+workspace root. It snapshots matching conversation DB generation indexes and,
+at completion, reads later counters from old or newly created DBs carrying that
+workspace URI. A shared repository cwd is intentionally left estimated because
+it cannot safely distinguish concurrent Agy workers. The older
 `run_agent_step()` interactive seam remains estimated, while production
 `assign` turns are native for these three providers.
 
