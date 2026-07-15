@@ -1273,6 +1273,10 @@ def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
             "session_name": meta["session_name"],
             "provider": meta["provider"],
             "agent_profile": meta.get("agent_profile"),
+            # A verified CAO terminal is a project worker, not an unbounded
+            # operator. MemoryService uses this as the maximum write scope.
+            # Direct callers without CAO_TERMINAL_ID retain operator semantics.
+            "caller_scope": "project",
         }
         # Try to get working directory for project scope resolution
         try:
@@ -1321,6 +1325,10 @@ async def memory_store(
 
     Use this to persist facts, decisions, user preferences, and project conventions
     that should be available across agent sessions.
+
+    Project-specific facts must use project scope. Global scope is reserved for
+    cross-project user preferences and universally applicable operating rules;
+    terminal-bound project workers cannot write it.
     """
     from cli_agent_orchestrator.services.memory_service import MemoryService
 

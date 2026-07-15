@@ -218,7 +218,7 @@ class TestRecallScopePrecedence:
             svc.store(
                 content="global fact",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="fact-global",
                 terminal_context=ctx,
             )
@@ -357,7 +357,7 @@ class TestGetContextRespectsBudget:
                     content=f"Memory entry number {i} with some padding content to take up space "
                     * 3,
                     scope="global",
-                    memory_type="project",
+                    memory_type="reference",
                     key=f"entry-{i:03d}",
                     terminal_context=ctx,
                 )
@@ -472,7 +472,7 @@ class TestSurviveRestart:
             svc1.store(
                 content="persistent data",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="persistent",
                 terminal_context=ctx,
             )
@@ -505,7 +505,7 @@ class TestKeyPathTraversalRejected:
             svc.store(
                 content="test content",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="../../etc/passwd",
                 terminal_context=ctx,
             )
@@ -524,7 +524,7 @@ class TestKeyPathTraversalRejected:
             svc.store(
                 content="test content",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="/etc/passwd",
                 terminal_context=ctx,
             )
@@ -543,7 +543,7 @@ class TestKeyPathTraversalRejected:
             svc.store(
                 content="test content",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="safe\x00evil",
                 terminal_context=ctx,
             )
@@ -561,7 +561,7 @@ class TestKeyPathTraversalRejected:
             svc.store(
                 content="test content",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="evil](../../secrets.md) — type:user",
                 terminal_context=ctx,
             )
@@ -596,7 +596,7 @@ class TestRecallNoContextOnlyGlobal:
             svc.store(
                 content="global knowledge",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="global-info",
                 terminal_context=ctx,
             )
@@ -658,7 +658,7 @@ class TestConcurrentStores:
             return await svc.store(
                 content=f"Concurrent memory entry {i}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=f"concurrent-{i}",
                 terminal_context=ctx,
             )
@@ -697,7 +697,7 @@ class TestIndexConsistency:
                 svc.store(
                     content=f"Memory {i}",
                     scope="global",
-                    memory_type="project",
+                    memory_type="reference",
                     key=f"mem-{i}",
                     terminal_context=ctx,
                 )

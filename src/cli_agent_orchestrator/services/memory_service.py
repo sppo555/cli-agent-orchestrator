@@ -667,6 +667,17 @@ class MemoryService:
         MemoryScope(scope)
         MemoryType(memory_type)
 
+        # Scope/type isolation policy. A project-classified fact can never be
+        # placed in the machine-wide global pool, even by an operator. Keep
+        # this check immediately after enum validation and before scope
+        # resolution or any filesystem/SQLite work so creates and updates
+        # fail closed through the same boundary.
+        if scope == MemoryScope.GLOBAL.value and memory_type == MemoryType.PROJECT.value:
+            logger.warning("memory_scope_type_rejected scope=global type=project")
+            raise ValueError(
+                "memory_type 'project' cannot be stored in global scope; " "use scope='project'"
+            )
+
         # Federated writes are credential-gated. The machine-wide shared
         # tier rejects content matching common secret patterns. The log
         # line carries the pattern NAME only — never content bytes.

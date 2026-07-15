@@ -5,7 +5,8 @@ CAO's memory system gives agents persistent, cross-session storage. Agents store
 
 ## Capabilities
 
-- **Five scopes** (`global`, `project`, `session`, `agent`, `federated`) and four type labels.
+- **Five scopes** (`global`, `project`, `session`, `agent`, `federated`) and four type labels,
+  with a hard isolation rule that rejects `scope="global"` + `memory_type="project"`.
 - **Store** via the `memory_store` MCP tool; **recall / forget** via MCP tools or the `cao memory` CLI.
 - **Markdown wiki storage** with a SQLite metadata index.
 - **Search**: keyword (BM25), recency, or hybrid; results ranked by recency, a
@@ -82,7 +83,9 @@ source of "where did my memory go?" questions.
 > There is **no "user folder" and no `user` scope.** `user` is a *type*, not a scope.
 > A "user memory" is simply `memory_type="user"` — by convention stored at
 > `scope="global"` so it applies across every project. The same is true of
-> `feedback` and `reference`: all four types can be attached to any scope.
+> `feedback` and `reference`. The one intentionally invalid pairing is
+> `scope="global"` + `memory_type="project"`; the store boundary rejects it before
+> writing any wiki, index, or SQLite data.
 
 ## Memory Scopes
 
@@ -123,6 +126,12 @@ Type is a classification label — it does not affect storage location (see
 | `feedback` | Corrections, recurring mistakes to avoid |
 | `reference` | Pointers to external resources, docs, links |
 
+Project implementation facts, task status, test results, paths, ports, architecture
+decisions, slices, milestones, and acceptance results must use `project` scope. Temporary
+coordination state belongs in `session`. Global scope is reserved for durable cross-project
+user preferences and universally applicable CAO operating rules. When uncertain, use
+`project`; never widen a project fact to global scope.
+
 ## MCP Tools
 
 Agents use these tools via the `cao-mcp-server` MCP server.
@@ -130,6 +139,11 @@ Agents use these tools via the `cao-mcp-server` MCP server.
 ### `memory_store`
 
 Store or update a memory. If the key already exists, the new content is appended as a timestamped entry (upsert).
+
+Calls made from a verified CAO terminal run with `project` as their maximum write scope.
+They may write project, session, and eligible narrower tiers, but cannot write global.
+Unbound operator/service callers retain global administration semantics; even those callers
+cannot store `memory_type="project"` in global scope.
 
 ```
 memory_store(
@@ -150,9 +164,9 @@ memory_store(
 #### Storing into each scope
 
 The only argument that changes *where* the memory lands is `scope`. `memory_type` is
-carried along as a label and is orthogonal — pass `user`, `feedback`, `reference`, or
-`project` with any scope. Each non-`global` scope needs a piece of the terminal's
-context to resolve its `scope_id`; if it can't, the store raises `ValueError`.
+carried along as a label, subject to the hard rule that `project` type cannot use global
+scope. Each non-`global` scope needs a piece of the terminal's context to resolve its
+`scope_id`; if it can't, the store raises `ValueError`.
 
 ```python
 # global — cross-project. No scope_id needed.

@@ -249,7 +249,7 @@ def test_enabled_default_preserves_round_trip(tmp_path: Path) -> None:
             svc.store(
                 content="round-trip body",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="rt-01",
                 tags="rt",
                 terminal_context=_ctx(),
