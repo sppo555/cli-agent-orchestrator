@@ -27,12 +27,12 @@ Define the agent's role, responsibilities, and behavior here.
 - `role` (string): Agent role that determines default tool access. One of `"supervisor"`, `"developer"`, `"reviewer"`, or a custom role. See [Tool Restrictions](tool-restrictions.md).
 - `provider` (string): Provider to run this agent on (e.g., `"claude_code"`, `"kiro_cli"`). See [Cross-Provider Orchestration](#cross-provider-orchestration).
 - `allowedTools` (array): CAO tool vocabulary allowlist. Overrides role-based defaults. Can be used with or without `role`. See [Tool Restrictions](tool-restrictions.md).
-- `skills` (array): Restrict this agent's injected skill catalog to skills whose name matches these patterns (exact names or case-sensitive [`fnmatch`](https://docs.python.org/3/library/fnmatch.html) globs, e.g. `"ads-*"`). Omit for the full catalog; `[]` advertises none. Applies only to runtime-prompt providers (Claude Code, Codex, Antigravity, Kimi). See [Skills](skills.md#scoping-the-catalog-per-agent-skills).
+- `skills` (array): Restrict this agent's injected skill catalog to skills whose name matches these patterns (exact names or case-sensitive [`fnmatch`](https://docs.python.org/3/library/fnmatch.html) globs, e.g. `"ads-*"`). Omit for the full catalog; `[]` advertises none. Applies only to runtime-prompt providers (Claude Code, Codex, Antigravity, Kimi, Grok). See [Skills](skills.md#scoping-the-catalog-per-agent-skills).
 - `mcpServers` (object): MCP server configurations for additional tools
 - `tools` (array): List of allowed tools, use `["*"]` for all
 - `toolAliases` (object): Map tool names to aliases
 - `toolsSettings` (object): Tool-specific configuration
-- `model` (string): AI model to use
+- `model` (string): AI model to use. For `grok_cli`, this is passed through `--model`; the profile value wins over a runtime override.
 - `permissionMode` (string, `claude_code` only): One of `"default"`, `"acceptEdits"`, `"plan"`, `"auto"`, `"bypassPermissions"`. When set, the `claude_code` provider passes `--permission-mode <value>` instead of `--dangerously-skip-permissions`. `permissionMode` takes priority over `--yolo`; the provider always uses `--permission-mode <value>` when the field is set. See [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes).
 - `native_agent` (string, `claude_code` only): Name of a native Claude Code agent (`~/.claude/agents/`). When set, the provider passes `--agent <name>` directly and skips system prompt / MCP config decomposition (thin-wrapper mode). See [Claude Code native agent routing](claude-code.md#native-agent-routing).
 - `codexProfile` (string, `codex` only): Names a `[profiles.<name>]` block in `~/.codex/config.toml`. When set, the provider drops `--yolo` and passes `--profile <name>` instead. See [Custom Codex Profile](codex-cli.md#custom-codex-profile).
@@ -98,7 +98,12 @@ Agent profiles can declare which provider they should run on via the `provider` 
 
 When the supervisor calls `assign` or `handoff`, CAO reads the worker's agent profile and uses the declared `provider` if it is a valid value. If the key is missing or the value is not recognized, the worker inherits the supervisor's provider.
 
-Valid values: `kiro_cli`, `claude_code`, `codex`, `antigravity_cli`, `hermes`, `kimi_cli`, `copilot_cli`, `opencode_cli`, `cursor_cli`.
+Valid values: `kiro_cli`, `claude_code`, `codex`, `antigravity_cli`, `grok_cli`, `hermes`, `kimi_cli`, `copilot_cli`, `opencode_cli`, `cursor_cli`.
+
+> **Grok limitation:** `grok_cli` is lifecycle-only in V1. Profile
+> `mcpServers` entries are not copied into Grok configuration, and CAO MCP
+> delegation is not supported. The upstream profile schema has no `effort`
+> field; customized forks that add one can pass it through defensively.
 
 ### Example
 

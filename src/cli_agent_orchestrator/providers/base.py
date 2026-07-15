@@ -30,6 +30,10 @@ from cli_agent_orchestrator.models.terminal import TerminalStatus
 logger = logging.getLogger(__name__)
 
 
+class IncompleteOutputError(ValueError):
+    """Raised when a provider cannot safely expose a still-active response."""
+
+
 class BaseProvider(ABC):
     """Abstract base class for CLI tool providers.
 

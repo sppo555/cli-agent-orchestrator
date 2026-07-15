@@ -1,0 +1,6 @@
+❯ Reply with exactly DONE.
+⠧ Starting session… 1.0s
+DONE
+Turn completed in 2.0s.
+│ ❯                                                                 │
+╰──────────────────────── Grok 4.5 (high) · always-approve ─────────╯

@@ -1,0 +1,49 @@
+{
+  "configSources": {
+    "layers": [
+      {
+        "path": "<USER_GROK_CONFIG>",
+        "role": "user"
+      }
+    ]
+  },
+  "cwd": "<PROJECT_ROOT>",
+  "grokVersion": "0.2.101",
+  "loginPolicy": {
+    "apiKeyAuthDisabled": "<REDACTED>",
+    "disableApiKeyAuth": "<REDACTED>",
+    "forceLoginTeamUuid": null
+  },
+  "mcpServers": [
+    {
+      "name": "project-server-a",
+      "source": {
+        "path": "<PROJECT_MCP_CONFIG>",
+        "type": "mcpJson"
+      },
+      "target": "<LOCAL_EXECUTABLE>",
+      "transport": "stdio"
+    },
+    {
+      "name": "project-server-b",
+      "source": {
+        "path": "<PROJECT_MCP_CONFIG>",
+        "type": "mcpJson"
+      },
+      "target": "<PACKAGE_RUNNER>",
+      "transport": "stdio"
+    }
+  ],
+  "projectRoot": "<PROJECT_ROOT>",
+  "projectTrusted": true,
+  "skills": [
+    {
+      "name": "bundled-skill",
+      "source": {
+        "path": "<USER_SKILL_PATH>",
+        "type": "bundled"
+      },
+      "userInvocable": true
+    }
+  ]
+}

@@ -97,6 +97,17 @@ def require_antigravity():
 
 
 @pytest.fixture()
+def require_grok():
+    """Skip test if Grok CLI is unavailable or live tests were not requested."""
+    import os
+
+    if not _cli_available("grok"):
+        pytest.skip("Grok CLI not installed")
+    if os.getenv("CAO_RUN_GROK_INTEGRATION") != "1":
+        pytest.skip("set CAO_RUN_GROK_INTEGRATION=1 to run live Grok tests")
+
+
+@pytest.fixture()
 def require_cursor():
     """Skip test if Cursor CLI (agent or cursor-agent) is not available."""
     if _cli_available("agent") or _cli_available("cursor-agent"):

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- add a lifecycle-only Grok CLI provider with native deny rules, subagent
+  restriction, raw/rendered status detection, response extraction, and Web/API
+  registration; CAO MCP orchestration remains unsupported
+
 ## [2.3.0] - 2026-07-12
 
 ### Added
@@ -606,5 +615,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump to v0.51.0, update method name (#31)
 
 - accept optional U+03BB (λ) after % in kiro and q CLIs (#44)
-
 

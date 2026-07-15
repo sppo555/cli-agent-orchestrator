@@ -1,0 +1,60 @@
+{
+  "failing_count": 0,
+  "healthy_count": 2,
+  "servers": [
+    {
+      "checks": [
+        {
+          "detail": "<LOCAL_EXECUTABLE>",
+          "label": "command found",
+          "passed": true
+        },
+        {
+          "detail": "protocol 2025-06-18",
+          "label": "handshake OK",
+          "passed": true
+        }
+      ],
+      "healthy": true,
+      "name": "project-server-a",
+      "source": "<PROJECT_MCP_CONFIG>",
+      "target": "<LOCAL_EXECUTABLE>",
+      "transport": "stdio"
+    },
+    {
+      "checks": [
+        {
+          "detail": "<PACKAGE_RUNNER>",
+          "label": "command found",
+          "passed": true
+        },
+        {
+          "detail": "protocol 2025-06-18",
+          "label": "handshake OK",
+          "passed": true
+        }
+      ],
+      "healthy": true,
+      "name": "project-server-b",
+      "source": "<PROJECT_MCP_CONFIG>",
+      "target": "<PACKAGE_RUNNER>",
+      "transport": "stdio"
+    }
+  ],
+  "sources": [
+    {
+      "path": "<USER_GROK_CONFIG>",
+      "status": {
+        "server_count": 0,
+        "status": "found"
+      }
+    },
+    {
+      "path": "<PROJECT_MCP_CONFIG>",
+      "status": {
+        "server_count": 2,
+        "status": "found"
+      }
+    }
+  ]
+}

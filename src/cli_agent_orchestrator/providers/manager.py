@@ -11,6 +11,7 @@ from cli_agent_orchestrator.providers.claude_code import ClaudeCodeProvider
 from cli_agent_orchestrator.providers.codex import CodexProvider
 from cli_agent_orchestrator.providers.copilot_cli import CopilotCliProvider
 from cli_agent_orchestrator.providers.cursor_cli import CursorCliProvider
+from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
 from cli_agent_orchestrator.providers.hermes import HermesProvider
 from cli_agent_orchestrator.providers.kimi_cli import KimiCliProvider
 from cli_agent_orchestrator.providers.kiro_cli import KiroCliProvider
@@ -115,6 +116,16 @@ class ProviderManager:
                 )
             elif provider_type == ProviderType.ANTIGRAVITY_CLI.value:
                 provider = AntigravityCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    agent_profile,
+                    allowed_tools,
+                    model=model,
+                    skill_prompt=skill_prompt,
+                )
+            elif provider_type == ProviderType.GROK_CLI.value:
+                provider = GrokCliProvider(
                     terminal_id,
                     tmux_session,
                     tmux_window,

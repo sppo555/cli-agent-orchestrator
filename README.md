@@ -128,6 +128,7 @@ CAO drives existing CLI agent tools — it does not replace them. Before using C
 | **OpenCode CLI** *(experimental — temporary inbox polling fallback for multi-agent callbacks, [#203](https://github.com/awslabs/cli-agent-orchestrator/issues/203))* | [Provider docs](docs/opencode-cli.md) · [Installation](https://opencode.ai) | Per-model API key |
 | **Cursor CLI** | [Provider docs](docs/cursor-cli.md) · [Installation](https://cursor.com/cli) | Cursor subscription / API key |
 | **Antigravity CLI** | [Provider docs](docs/antigravity-cli.md) · [Installation](https://antigravity.google) | Google account (shared with the Antigravity IDE login) |
+| **Grok CLI** *(lifecycle-only; CAO MCP orchestration is not supported)* | [Provider docs](docs/grok-cli.md) | xAI/Grok account |
 
 ## Quick Start
 
@@ -174,7 +175,7 @@ cao launch --agents code_supervisor
 
 # Or specify a provider
 cao launch --agents code_supervisor --provider claude_code
-# Valid: kiro_cli | claude_code | codex | antigravity_cli | hermes | kimi_cli | copilot_cli | opencode_cli | cursor_cli
+# Valid: kiro_cli | claude_code | codex | antigravity_cli | grok_cli | hermes | kimi_cli | copilot_cli | opencode_cli | cursor_cli
 
 # Unrestricted access, skip confirmation (DANGEROUS)
 cao launch --agents code_supervisor --yolo
@@ -284,7 +285,7 @@ provider: claude_code
 ---
 ```
 
-Valid values: `kiro_cli`, `claude_code`, `codex`, `antigravity_cli`, `hermes`, `kimi_cli`, `copilot_cli`, `opencode_cli`, `cursor_cli`. The `cao launch --provider` flag always takes precedence for the initial session. See [`examples/cross-provider/`](examples/cross-provider/).
+Valid values: `kiro_cli`, `claude_code`, `codex`, `antigravity_cli`, `grok_cli`, `hermes`, `kimi_cli`, `copilot_cli`, `opencode_cli`, `cursor_cli`. The `cao launch --provider` flag always takes precedence for the initial session. Grok V1 is lifecycle-only and cannot be used for CAO MCP delegation. See [`examples/cross-provider/`](examples/cross-provider/).
 
 ### Tool Restrictions
 
@@ -391,7 +392,7 @@ cao skills add ./my-coding-standards --force   # overwrite
 cao skills remove my-coding-standards
 ```
 
-Skills are delivered to providers automatically (native `skill://` resources for Kiro CLI; runtime prompt injection for Claude Code / Codex / Kimi; baked-in `.agent.md` for Copilot).
+Skills are delivered to providers automatically (native `skill://` resources for Kiro CLI; runtime prompt injection for Claude Code / Codex / Kimi / Antigravity / Grok; baked-in `.agent.md` for Copilot).
 
 For the full reference — authoring, loading, delivery mechanics — see [docs/skills.md](docs/skills.md). For integrating with OpenClaw or other external tools, see [docs/external-tool-integration.md](docs/external-tool-integration.md).
 

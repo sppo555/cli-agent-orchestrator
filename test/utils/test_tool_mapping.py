@@ -112,6 +112,14 @@ class TestGetDisallowedTools:
         assert "write_file" in result
         assert "replace" in result
 
+    def test_grok_cli_reviewer(self):
+        result = get_disallowed_tools("grok_cli", ["fs_read", "fs_list"])
+        assert "Bash" in result
+        assert "Edit" in result
+        assert "Read" not in result
+        assert "Grep" not in result
+        assert "WebFetch" in result
+
     def test_mcp_refs_ignored(self):
         """@-prefixed MCP refs don't map to native tools."""
         result = get_disallowed_tools("claude_code", ["@cao-mcp-server", "@custom"])

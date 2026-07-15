@@ -99,12 +99,12 @@ No `role` is needed — `allowedTools` is the full specification of what tools t
 
 #### Tool Vocabulary
 
-| Tool | What it allows | Example: Claude Code | Example: Copilot CLI |
-|------|---------------|---------------------|-------------------|
-| `execute_bash` | Run shell commands | `Bash` | `shell` |
-| `fs_read` | Read files | `Read` | `read` |
-| `fs_write` | Write/edit files | `Edit`, `Write` | `write` |
-| `fs_list` | Search/list files | `Glob`, `Grep` | `list`, `grep` |
+| Tool | What it allows | Example: Claude Code | Example: Copilot CLI | Grok CLI |
+|------|---------------|---------------------|-------------------|----------|
+| `execute_bash` | Run shell commands | `Bash` | `shell` | `Bash` |
+| `fs_read` | Read files | `Read` | `read` | `Read`, `Grep` |
+| `fs_write` | Write/edit files | `Edit`, `Write` | `write` | `Edit` |
+| `fs_list` | Search/list files | `Glob`, `Grep` | `list`, `grep` | `Read`, `Grep` |
 | `fs_*` | All filesystem ops | All of the above | All of the above |
 | `web_fetch` | Fetch URLs / search the web | `WebFetch`, `WebSearch` | (not mapped) |
 | `@builtin` | Provider built-in capabilities | (internal) | (internal) |
@@ -244,6 +244,7 @@ As described in [How Tool Restrictions Are Enforced](#how-tool-restrictions-are-
 | **Kimi CLI** | Soft | Security system prompt only |
 | **Codex** | Soft | Security system prompt only |
 | **Hermes** | Profile-defined | CAO launches default `hermes` or the optional `hermesProfile` wrapper declared by the CAO profile; restrict tools in that Hermes profile |
+| **Grok CLI** | Hard | `--deny` rules block native tool families; `--no-subagents` is added when Bash is disallowed |
 
 **Hard enforcement** = the agent physically cannot use denied tools, enforced by the provider runtime.
 
@@ -257,6 +258,11 @@ claude --dangerously-skip-permissions --disallowedTools Bash --disallowedTools E
 ```
 
 `permissionMode` is a separate axis from `--disallowedTools`: `permissionMode` controls which permission tier the session runs under (unconditional bypass vs. classifier-gated tiers like `auto`), while `--disallowedTools` enforces the per-tool denylist. The two stack — a profile can set `permissionMode: auto` *and* a tool denylist, and both apply on the launch command. See [Permission Mode Override](claude-code.md#permission-mode-override) for full details.
+
+**Grok CLI** — Starts with `--always-approve`, then adds one `--deny` rule
+per disallowed native tool. If `execute_bash` is absent it also adds
+`--no-subagents`, closing the delegated shell/edit escape observed during
+Phase 0. Grok V1 does not expose CAO MCP orchestration.
 
 **Kiro CLI** — Writes `allowedTools` into the agent JSON at install time:
 ```json

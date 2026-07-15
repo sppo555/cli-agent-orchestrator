@@ -69,6 +69,17 @@ TOOL_MAPPING: Dict[str, Dict[str, List[str]]] = {
         ],
         "web_fetch": ["web_fetch", "google_web_search"],
     },
+    # Grok's permission rules accept Claude-compatible tool families.  Bash
+    # and Edit were verified live; the remaining names follow the same native
+    # permission vocabulary advertised by the CLI.
+    "grok_cli": {
+        "execute_bash": ["Bash"],
+        "fs_read": ["Read", "Grep"],
+        "fs_write": ["Edit"],
+        "fs_list": ["Read", "Grep"],
+        "fs_*": ["Read", "Grep", "Edit"],
+        "web_fetch": ["WebFetch"],
+    },
 }
 
 # Complete set of all native tools per provider (used to compute disallowed set).
