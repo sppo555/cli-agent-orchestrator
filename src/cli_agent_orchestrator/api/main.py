@@ -36,9 +36,10 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from cli_agent_orchestrator.backends import TerminalNotFoundError
+from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
+from cli_agent_orchestrator.backends.tmux_backend import TmuxBackend
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
     get_inbox_messages,
@@ -398,10 +399,14 @@ class InstallAgentProfileRequest(BaseModel):
 
     ``env_vars`` travels in the JSON body rather than as a query parameter so
     that any secrets callers inject are not written to HTTP access logs.
+
+    ``provider`` may be omitted (None): the install service then honours the
+    profile's frontmatter ``provider:`` key, falling back to the default
+    provider — the same flag > frontmatter > default precedence as the CLI.
     """
 
     source: str
-    provider: str = DEFAULT_PROVIDER
+    provider: Optional[str] = None
     env_vars: Optional[Dict[str, str]] = None
 
 
@@ -2047,6 +2052,7 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
     # or future code paths could still bypass that, and tmux parses
     # ':' / '.' as target delimiters. Bind the validator return values
     # so the sanitization is explicit at the actual sink below.
+    # This tmux-shaped validation is deliberately applied to every backend.
     try:
         session_name = validate_tmux_name(metadata["tmux_session"], "session_name")
         window_name = validate_tmux_name(metadata["tmux_window"], "window_name")
@@ -2054,39 +2060,44 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         await websocket.close(code=4003, reason="Invalid tmux target name")
         return
 
-    # Attaching directly to the shared CAO session would change that session's
-    # current window for *every* attached client (other browser viewers and a
-    # local ``tmux attach`` in a real terminal), because a tmux session has a
-    # single active window shared by all its clients. Selecting window B in one
-    # viewer would yank everyone else to window B.
-    #
-    # Instead, give each WebSocket its own grouped session. A grouped session
-    # (``new-session -t <target>``) shares the same windows/panes as the target
-    # session group — input still reaches the real agent pane — but it keeps an
-    # independent current window. Switching windows in one viewer therefore no
-    # longer disturbs the original session or any other viewer.
-    viewer_session = f"caoview_{uuid.uuid4().hex[:12]}"
+    backend = get_backend()
+    viewer_session: Optional[str] = None
     try:
-        subprocess.run(
-            ["tmux", "new-session", "-d", "-t", session_name, "-s", viewer_session],
-            check=True,
-            capture_output=True,
-        )
-        # CAO's detached source session may have a fixed manual size (for
-        # example 220x50). Give only this short-lived grouped viewer a
-        # client-driven sizing policy so the browser's PTY resize redraws the
-        # full xterm viewport instead of leaving stale cells on the right.
-        subprocess.run(
-            ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"],
-            check=False,
-            capture_output=True,
-        )
-    except (subprocess.CalledProcessError, OSError):
-        await websocket.close(code=4011, reason="Failed to create terminal viewer session")
+        if isinstance(backend, TmuxBackend):
+            # A grouped tmux session shares panes with the source while keeping
+            # its own current window, so one browser viewer cannot yank every
+            # other attached client to a different window.
+            viewer_session = f"caoview_{uuid.uuid4().hex[:12]}"
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-t", session_name, "-s", viewer_session],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"],
+                check=False,
+                capture_output=True,
+            )
+            attach_command = backend.prepare_web_attach(viewer_session, window_name)
+        else:
+            attach_command = await asyncio.to_thread(
+                backend.prepare_web_attach, session_name, window_name
+            )
+    except (TerminalBackendError, subprocess.CalledProcessError, OSError) as e:
+        if viewer_session is not None:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", viewer_session],
+                check=False,
+                capture_output=True,
+            )
+        logger.error(f"Web attach failed for terminal {terminal_id}: {e}")
+        await websocket.close(code=4004, reason="Failed to attach terminal")
         return
 
-    def _kill_viewer_session() -> None:
-        """Best-effort teardown of the per-connection grouped viewer session."""
+    def _cleanup_web_attach() -> None:
+        """Best-effort teardown for a per-connection tmux viewer session."""
+        if viewer_session is None:
+            return
         try:
             subprocess.run(
                 ["tmux", "kill-session", "-t", viewer_session],
@@ -2096,14 +2107,14 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         except OSError:
             pass
 
-    # Create PTY pair for tmux attach
+    # Create PTY pair for backend attach
     master_fd, slave_fd = pty.openpty()
 
     # Set initial terminal size
     winsize = struct.pack("HHHH", 24, 80, 0, 0)
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
-    # Start tmux attach inside the PTY.
+    # Start the configured backend's interactive client inside the PTY.
     # Container/devcontainer environments often leave TERM unset or set to
     # ``dumb``, which strips colours, breaks cursor positioning and corrupts
     # the Ink-based TUIs that agent CLIs render. Force a sane default so the
@@ -2111,7 +2122,7 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
     # Any explicit non-dumb TERM the operator set is preserved.
     pty_env = _build_pty_env()
     proc = subprocess.Popen(
-        ["tmux", "-u", "attach-session", "-t", f"{viewer_session}:{window_name}"],
+        attach_command,
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
@@ -2219,7 +2230,7 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         # Tear down the per-connection grouped viewer session. Killing a
         # grouped session only removes this viewer; the original CAO session
         # and its windows/panes survive because they belong to the group.
-        await asyncio.to_thread(_kill_viewer_session)
+        await asyncio.to_thread(_cleanup_web_attach)
 
 
 # ── Flow management endpoints ────────────────────────────────────────
