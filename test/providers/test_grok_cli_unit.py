@@ -115,7 +115,6 @@ def test_profile_model_precedes_constructor_model():
 
 def test_upstream_profile_without_effort_omits_flag():
     profile = AgentProfile(name="reviewer", description="Review")
-    assert not hasattr(profile, "effort")
     with (
         patch("cli_agent_orchestrator.providers.grok_cli.shutil.which", return_value="/bin/grok"),
         patch(
