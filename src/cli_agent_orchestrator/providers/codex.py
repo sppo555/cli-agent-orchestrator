@@ -321,6 +321,14 @@ class CodexProvider(BaseProvider):
                     # Resolve the bundled cao-mcp-server console script to a
                     # PATH-independent invocation.
                     cfg = resolve_mcp_server_config(cfg)
+                    is_http = bool(cfg.get("url")) and "command" not in cfg
+                    if is_http:
+                        # Treat profile HTTP entries as tool-authorization
+                        # references. Codex loads their transport/auth settings
+                        # from its trusted user/project config. Re-emitting even
+                        # the same URL through -c can conflict with a nested
+                        # env_http_headers table and make Codex infer stdio.
+                        continue
                     if "command" in cfg:
                         command_parts.extend(
                             ["-c", f"{prefix}.command={_toml_scalar(cfg['command'])}"]
