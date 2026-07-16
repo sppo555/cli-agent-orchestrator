@@ -426,6 +426,37 @@ class TestReconcileOrphanedMessages:
 
         assert svc.deliver_pending.call_count == 2
 
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_nudges_stale_processing_terminal_once(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.PROCESSING
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+        svc.reconcile_orphaned_messages()
+
+        mock_terminal_service.nudge_terminal_render.assert_called_once_with("receiver-1")
+
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_does_not_nudge_ready_terminal(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.COMPLETED
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+
+        mock_terminal_service.nudge_terminal_render.assert_not_called()
+
 
 class TestRun:
     """Tests for InboxService.run() event loop."""

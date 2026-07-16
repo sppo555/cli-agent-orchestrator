@@ -2,7 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from cli_agent_orchestrator.services.render_viewer import _RenderViewer
+from cli_agent_orchestrator.services import terminal_service
+from cli_agent_orchestrator.services.render_viewer import _RenderViewer, nudge_unattended_render
 
 
 def test_render_viewer_scopes_manual_size_to_its_grouped_session():
@@ -24,3 +25,44 @@ def test_render_viewer_scopes_manual_size_to_its_grouped_session():
     assert ["tmux", "set-option", "-t", viewer._viewer_session, "window-size", "manual"] in calls
     assert not any("set-window-option" in call for call in calls)
     assert not any(f"cao-main:developer" in call and "window-size" in call for call in calls)
+
+
+def test_unattended_nudge_is_one_shot_and_always_stops_viewer():
+    with patch("cli_agent_orchestrator.services.render_viewer._RenderViewer") as viewer_cls:
+        viewer = viewer_cls.return_value
+        viewer.start.return_value = True
+        viewer.nudge_once.return_value = True
+
+        assert nudge_unattended_render("cao-main", "reviewer", settle_seconds=0) is True
+
+        viewer_cls.assert_called_once_with("cao-main", "reviewer")
+        viewer.nudge_once.assert_called_once_with()
+        viewer.stop.assert_called_once_with()
+
+
+def test_terminal_nudge_skips_event_driven_backend():
+    with (
+        patch.object(terminal_service, "get_backend") as get_backend,
+        patch.object(terminal_service, "get_terminal_metadata") as get_metadata,
+        patch.object(terminal_service, "nudge_unattended_render") as nudge,
+    ):
+        get_backend.return_value.supports_event_inbox.return_value = True
+
+        assert terminal_service.nudge_terminal_render("worker-1") is False
+
+        get_metadata.assert_not_called()
+        nudge.assert_not_called()
+
+
+def test_terminal_nudge_resolves_tmux_target_from_metadata():
+    with (
+        patch.object(terminal_service, "get_backend") as get_backend,
+        patch.object(terminal_service, "get_terminal_metadata") as get_metadata,
+        patch.object(terminal_service, "nudge_unattended_render", return_value=True) as nudge,
+    ):
+        get_backend.return_value.supports_event_inbox.return_value = False
+        get_metadata.return_value = {"tmux_session": "cao-main", "tmux_window": "reviewer"}
+
+        assert terminal_service.nudge_terminal_render("worker-1") is True
+
+        nudge.assert_called_once_with("cao-main", "reviewer")

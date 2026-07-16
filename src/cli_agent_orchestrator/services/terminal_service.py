@@ -56,7 +56,10 @@ from cli_agent_orchestrator.services.fifo_reader import fifo_manager
 from cli_agent_orchestrator.services.herdr_inbox_registry import get_herdr_inbox_service
 from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
-from cli_agent_orchestrator.services.render_viewer import render_during_init
+from cli_agent_orchestrator.services.render_viewer import (
+    nudge_unattended_render,
+    render_during_init,
+)
 from cli_agent_orchestrator.services.session_env import (
     clear_session_env,
     get_session_env,
@@ -86,6 +89,20 @@ _deferred_init_tasks: set = set()
 
 class TerminalInputBlockedError(Exception):
     """Raised when orchestrated input would answer an active interactive prompt."""
+
+
+def nudge_terminal_render(terminal_id: str) -> bool:
+    """Force a safe one-shot redraw for a tmux terminal.
+
+    Socket/event-driven backends do not need a viewer and are left untouched.
+    No text or control input is sent to the agent.
+    """
+    if get_backend().supports_event_inbox():
+        return False
+    metadata = get_terminal_metadata(terminal_id)
+    if not metadata:
+        return False
+    return nudge_unattended_render(metadata["tmux_session"], metadata["tmux_window"])
 
 
 def inject_memory_context(first_message: str, terminal_id: str) -> str:

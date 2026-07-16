@@ -38,6 +38,7 @@ import struct
 import subprocess
 import termios
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from typing import Iterator, Tuple
@@ -170,25 +171,31 @@ class _RenderViewer:
         """
         toggled = False
         while not self._stop.wait(2.5):
-            rows = self._rows - 1 if toggled else self._rows
-            try:
-                subprocess.run(
-                    [
-                        "tmux",
-                        "resize-window",
-                        "-t",
-                        f"{self._viewer_session}:{self._window}",
-                        "-x",
-                        str(self._cols),
-                        "-y",
-                        str(rows),
-                    ],
-                    check=False,
-                    capture_output=True,
-                )
-                toggled = not toggled
-            except OSError:
+            if not self.nudge_once(shrink=toggled):
                 break
+            toggled = not toggled
+
+    def nudge_once(self, *, shrink: bool = True) -> bool:
+        """Force one repaint through the viewer without sending agent input."""
+        rows = max(1, self._rows - 1) if shrink else self._rows
+        try:
+            subprocess.run(
+                [
+                    "tmux",
+                    "resize-window",
+                    "-t",
+                    f"{self._viewer_session}:{self._window}",
+                    "-x",
+                    str(self._cols),
+                    "-y",
+                    str(rows),
+                ],
+                check=False,
+                capture_output=True,
+            )
+            return True
+        except OSError:
+            return False
 
     def _drain_loop(self) -> None:
         """Discard the attached client's screen output so its PTY never blocks."""
@@ -240,5 +247,25 @@ def render_during_init(session: str, window: str) -> Iterator[None]:
     viewer.start()
     try:
         yield
+    finally:
+        viewer.stop()
+
+
+def nudge_unattended_render(session: str, window: str, settle_seconds: float = 0.25) -> bool:
+    """Attach briefly and force one redraw for a quiescent unattended terminal.
+
+    This is the post-init counterpart to :func:`render_during_init`.  It is
+    intentionally one-shot: inbox reconciliation applies its own cooldown, and
+    a resize redraw is sufficient to make the current idle/completed frame flow
+    through tmux ``pipe-pane`` to the StatusMonitor.
+    """
+    viewer = _RenderViewer(session, window)
+    if not viewer.start():
+        return False
+    try:
+        nudged = viewer.nudge_once()
+        if nudged and settle_seconds > 0:
+            time.sleep(settle_seconds)
+        return nudged
     finally:
         viewer.stop()

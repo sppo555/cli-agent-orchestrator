@@ -5,6 +5,7 @@ Consumer: terminal.{id}.status
 
 import asyncio
 import logging
+import time
 from itertools import groupby
 
 from cli_agent_orchestrator.backends.base import TerminalNotFoundError
@@ -30,9 +31,14 @@ from cli_agent_orchestrator.utils.event import terminal_id_from_topic
 
 logger = logging.getLogger(__name__)
 
+_REDRAW_COOLDOWN_SECONDS = 60.0
+
 
 class InboxService:
     """Delivers one pending message per terminal per IDLE cycle."""
+
+    def __init__(self) -> None:
+        self._last_redraw_nudge: dict[str, float] = {}
 
     async def run(self, registry: PluginRegistry | None = None) -> None:
         queue = bus.subscribe("terminal.*.status")
@@ -168,6 +174,19 @@ class InboxService:
         for terminal_id in list_pending_receiver_ids_older_than(INBOX_RECONCILE_GRACE_SECONDS):
             try:
                 self.deliver_pending(terminal_id, registry=registry)
+                # A continued, unattended TUI can finish a turn without flushing
+                # its final idle frame through tmux pipe-pane.  CAO then keeps a
+                # stale PROCESSING status and the normal delivery gate above
+                # cannot drain the inbox until a human opens the Web terminal.
+                # Reproduce that harmless attach/resize redraw once, with a
+                # cooldown so genuinely long-running turns are not repeatedly
+                # resized.  The resulting status event drives normal delivery.
+                if status_monitor.get_status(terminal_id) == TerminalStatus.PROCESSING:
+                    now = time.monotonic()
+                    last = self._last_redraw_nudge.get(terminal_id, 0.0)
+                    if now - last >= _REDRAW_COOLDOWN_SECONDS:
+                        self._last_redraw_nudge[terminal_id] = now
+                        terminal_service.nudge_terminal_render(terminal_id)
             except Exception as e:
                 logger.debug(f"Inbox reconciliation failed for {terminal_id}: {e}")
 
