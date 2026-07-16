@@ -11,7 +11,8 @@ this plugin owns only the delimited section and preserves all surrounding
 hand-written content — the same replace-in-place approach as the Claude Code
 plugin, *not* the whole-file ownership used for Kiro steering files.
 
-The pre-initialize hook is a required security barrier: path and write failures
+The core terminal lifecycle invokes ``prepare`` as a required security barrier;
+plugin discovery is not part of that guarantee. Path, marker, and write failures
 propagate and abort provider startup so stale instructions cannot be loaded.
 """
 
@@ -26,9 +27,9 @@ from cli_agent_orchestrator.clients.tmux import tmux_client
 from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PreInitializeTerminalEvent,
-    hook,
 )
 from cli_agent_orchestrator.plugins.base import CaoPlugin
+from cli_agent_orchestrator.plugins.builtin.memory_markers import strip_managed_blocks
 from cli_agent_orchestrator.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,8 @@ class CodexMemoryPlugin(CaoPlugin):
     async def teardown(self) -> None:
         """Nothing to close; plugin holds no resources."""
 
-    @hook("pre_initialize_terminal")
     async def on_pre_initialize_terminal(self, event: PreInitializeTerminalEvent) -> None:
-        """Refresh or scrub AGENTS.md before Codex can read it."""
+        """Backward-compatible direct entry point for pre-start preparation."""
         if event.provider != "codex":
             return
         working_directory = self._resolve_working_directory(event)
@@ -178,27 +178,6 @@ class CodexMemoryPlugin(CaoPlugin):
 
     @staticmethod
     def _strip_existing_block(content: str) -> str:
-        """Remove any prior cao-memory block so we replace rather than append.
+        """Remove valid blocks and reject malformed marker ownership."""
 
-        Each BEGIN is paired with the END that follows it. A stray BEGIN with
-        no following END (or with another BEGIN before its END) is treated as
-        corruption: only the marker token is removed, never the user content
-        around it. This stops a stale unclosed BEGIN from later pairing with an
-        unrelated block's END and deleting everything in between.
-        """
-
-        while True:
-            begin = content.find(BEGIN_MARKER)
-            if begin == -1:
-                break
-            end = content.find(END_MARKER, begin + len(BEGIN_MARKER))
-            next_begin = content.find(BEGIN_MARKER, begin + len(BEGIN_MARKER))
-            if end == -1 or (next_begin != -1 and next_begin < end):
-                # Stray/unclosed BEGIN: drop only the marker, keep all content.
-                content = content[:begin] + content[begin + len(BEGIN_MARKER) :]
-                continue
-            # Remove only bytes inside the managed boundary. Newlines and all
-            # surrounding user-authored bytes remain exactly as written.
-            content = content[:begin] + content[end + len(END_MARKER) :]
-
-        return content
+        return strip_managed_blocks(content, BEGIN_MARKER, END_MARKER)

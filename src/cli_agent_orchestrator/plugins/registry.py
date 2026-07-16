@@ -74,10 +74,11 @@ class PluginRegistry:
                 )
 
     async def dispatch_strict(self, event_type: str, event: CaoEvent) -> None:
-        """Dispatch a required pre-start event and propagate hook failures.
+        """Dispatch a strict pre-start extension event and propagate failures.
 
-        Unlike observer events, security preparation must complete before a
-        provider starts. A handler failure therefore aborts terminal creation.
+        Unlike observer events, registered pre-start extensions must complete
+        before a provider starts. Core provider-memory safety is handled before
+        this dispatch and does not depend on plugin registration.
         """
         for handler in self._dispatch.get(event_type, []):
             await handler(event)

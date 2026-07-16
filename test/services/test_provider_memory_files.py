@@ -37,6 +37,7 @@ def test_provider_file_scrub_is_dry_run_by_default_and_preserves_user_bytes(
     dry_run = scrub_provider_memory_files(tmp_path)
 
     assert dry_run["applied"] is False
+    assert dry_run["blocked"] == 0
     assert {item["provider"] for item in dry_run["findings"]} == {
         "codex",
         "claude_code",
@@ -64,3 +65,26 @@ def test_provider_file_scrub_ignores_unmanaged_user_files(tmp_path: Path) -> Non
     assert report["findings"] == []
     assert codex.read_bytes() == b"codex user bytes  \n"
     assert claude.read_bytes() == b"claude user bytes  \n"
+
+
+def test_provider_file_scrub_reports_malformed_block_without_mutating(
+    tmp_path: Path,
+) -> None:
+    """Ambiguous ownership is visible but never auto-repaired, even with --apply."""
+
+    target = tmp_path / "AGENTS.md"
+    original = f"user-prefix\n{CODEX_BEGIN}\nprivate stale payload\n"
+    target.write_text(original, encoding="utf-8")
+
+    report = scrub_provider_memory_files(tmp_path, apply=True)
+
+    assert report["blocked"] == 1
+    assert report["findings"] == [
+        {
+            "provider": "codex",
+            "path": str(target),
+            "ownership": "managed-block",
+            "status": "malformed",
+        }
+    ]
+    assert target.read_text(encoding="utf-8") == original

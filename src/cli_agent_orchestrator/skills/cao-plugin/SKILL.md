@@ -71,7 +71,9 @@ A hook method must:
 
 Multiple hook methods on the same plugin may subscribe to the same event type — each is dispatched independently. Execution order across hooks is not guaranteed.
 
-Exceptions raised inside a hook are caught by the registry and logged as warnings. They do not affect CAO's primary operation and they do not stop other hooks for the same event from running.
+Exceptions raised inside observer hooks are caught and logged. Exceptions from the
+strict `pre_initialize_terminal` extension phase propagate and abort terminal creation;
+CAO's built-in provider-memory preparation remains core-owned and registry-independent.
 
 ### 4. Entry-point registration
 

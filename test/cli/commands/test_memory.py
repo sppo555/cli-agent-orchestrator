@@ -620,10 +620,12 @@ class TestScopeIsolationMaintenance:
         mock_scrub.return_value = {
             "project_dir": str(tmp_path),
             "applied": False,
+            "blocked": 0,
             "findings": [
                 {
                     "provider": "codex",
                     "ownership": "managed-block",
+                    "status": "valid",
                     "path": str(tmp_path / "AGENTS.md"),
                 }
             ],

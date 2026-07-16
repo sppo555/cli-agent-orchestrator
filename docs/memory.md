@@ -95,12 +95,15 @@ quarantine operation and requires `--apply` before it changes the wiki, index, o
 metadata. Neither command prints memory bodies.
 
 CAO also refreshes provider-native derivative copies before Codex, Claude Code, or Kiro
-starts. The required `pre_initialize_terminal` barrier runs before both synchronous and
+starts. This preparation is owned by the core terminal lifecycle, independent of plugin
+registry presence or built-in plugin discovery, and runs before both synchronous and
 deferred provider initialization. An empty current context removes an old CAO-managed
 block from `AGENTS.md` or `.claude/CLAUDE.md`, or deletes Kiro's dedicated
 `.kiro/steering/cao-memory.md`; surrounding user-authored instructions are preserved.
-Path or write failures abort provider startup rather than allowing stale instructions to
-load.
+Path, malformed-marker, or write failures abort provider startup rather than allowing
+stale instructions to load. Malformed Codex/Claude blocks remain byte-identical for
+explicit operator repair; `scrub-provider-files` reports them as blocked and never
+guesses ownership.
 
 ## Memory Scopes
 

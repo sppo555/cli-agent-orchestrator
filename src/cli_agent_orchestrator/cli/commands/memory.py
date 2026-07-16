@@ -330,13 +330,25 @@ def scrub_provider_files_cmd(project_dir, do_apply, out_format):
     if out_format.lower() == "json":
         click.echo(_json.dumps(report, indent=2))
         return
-    action = "SCRUBBED" if report["applied"] else "DRY-RUN"
+    action = (
+        "BLOCKED"
+        if report["applied"] and report["blocked"]
+        else "SCRUBBED" if report["applied"] else "DRY-RUN"
+    )
     click.echo(f"{action}: {report['project_dir']}")
     if not report["findings"]:
         click.echo("No CAO-managed provider memory files found.")
         return
     for finding in report["findings"]:
-        click.echo(f"{finding['provider']:<12} {finding['ownership']:<13} {finding['path']}")
+        click.echo(
+            f"{finding['provider']:<12} {finding['ownership']:<13} "
+            f"{finding['status']:<9} {finding['path']}"
+        )
+    if report["blocked"]:
+        click.echo(
+            f"{report['blocked']} malformed managed block(s) were left unchanged "
+            "for explicit operator repair."
+        )
     if not report["applied"]:
         click.echo("No files were changed. Pass --apply to scrub these managed copies.")
 

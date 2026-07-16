@@ -206,7 +206,7 @@ class TestTerminalPluginEvents:
         registry.dispatch_strict.side_effect = record_pre_dispatch
 
         terminal = await create_terminal(
-            provider="kiro_cli",
+            provider="opencode_cli",
             agent_profile="developer",
             session_name="demo",
             new_session=True,
@@ -238,7 +238,7 @@ class TestTerminalPluginEvents:
         assert event.session_id == "cao-demo"
         assert event.terminal_id == "abcd1234"
         assert event.agent_name == "developer"
-        assert event.provider == "kiro_cli"
+        assert event.provider == "opencode_cli"
 
     @pytest.mark.asyncio
     @patch("cli_agent_orchestrator.services.terminal_service.TERMINAL_LOG_DIR")
@@ -282,7 +282,7 @@ class TestTerminalPluginEvents:
 
         with pytest.raises(RuntimeError, match="provider init failed"):
             await create_terminal(
-                provider="kiro_cli",
+                provider="opencode_cli",
                 agent_profile="developer",
                 session_name="demo",
                 new_session=True,

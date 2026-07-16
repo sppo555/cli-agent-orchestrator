@@ -6,8 +6,9 @@ loads every ``*.md`` file under ``.kiro/steering/``, so this file is picked
 up automatically. The plugin owns this file end-to-end and overwrites it
 whole on each run (no in-file markers).
 
-The pre-initialize hook is a required security barrier: path and write failures
-propagate and abort provider startup so stale steering cannot be loaded.
+The core terminal lifecycle invokes ``prepare`` as a required security barrier;
+plugin discovery is not part of that guarantee. Path and write failures propagate
+and abort provider startup so stale steering cannot be loaded.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from cli_agent_orchestrator.clients.tmux import tmux_client
 from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PreInitializeTerminalEvent,
-    hook,
 )
 from cli_agent_orchestrator.plugins.base import CaoPlugin
 from cli_agent_orchestrator.services.memory_service import MemoryService
@@ -41,9 +41,8 @@ class KiroCliMemoryPlugin(CaoPlugin):
     async def teardown(self) -> None:
         """Stateless; nothing to close."""
 
-    @hook("pre_initialize_terminal")
     async def on_pre_initialize_terminal(self, event: PreInitializeTerminalEvent) -> None:
-        """Refresh or remove steering before Kiro can read it."""
+        """Backward-compatible direct entry point for pre-start preparation."""
         if event.provider != "kiro_cli":
             return
         working_directory = self._resolve_working_directory(event)

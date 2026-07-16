@@ -10,6 +10,9 @@ from cli_agent_orchestrator.plugins.builtin.codex_memory import (
     END_MARKER,
     CodexMemoryPlugin,
 )
+from cli_agent_orchestrator.plugins.builtin.memory_markers import (
+    MalformedMemoryMarkersError,
+)
 
 
 def _event(provider: str = "codex", terminal_id: str = "t1") -> PostCreateTerminalEvent:
@@ -432,10 +435,8 @@ def test_strip_existing_block_removes_multiple_blocks() -> None:
     assert "tail text" in stripped
 
 
-def test_strip_existing_block_preserves_content_around_stray_begin() -> None:
-    """A stray unclosed BEGIN must not pair with a later block's END and delete
-    the user content in between (Copilot finding on #269). Only the stray marker
-    token is removed; surrounding text and the real block survive for re-strip."""
+def test_strip_existing_block_rejects_nested_begin() -> None:
+    """Ambiguous nested ownership must fail closed without returning a rewrite."""
 
     content = (
         "# Agents readme\n"
@@ -445,26 +446,21 @@ def test_strip_existing_block_preserves_content_around_stray_begin() -> None:
         "tail text\n"
     )
 
-    stripped = CodexMemoryPlugin._strip_existing_block(content)
-
-    assert BEGIN_MARKER not in stripped
-    assert END_MARKER not in stripped
-    assert "important user notes" in stripped
-    assert "# Agents readme" in stripped
-    assert "tail text" in stripped
-    assert "real block" not in stripped
+    with pytest.raises(MalformedMemoryMarkersError, match="malformed CAO memory markers"):
+        CodexMemoryPlugin._strip_existing_block(content)
 
 
-def test_strip_existing_block_keeps_content_when_end_missing() -> None:
-    """A BEGIN with no END anywhere drops only the marker, keeping all text."""
+def test_write_block_rejects_unclosed_begin_without_mutation(tmp_path: Path) -> None:
+    """An unclosed BEGIN is preserved byte-for-byte and cannot be rewritten."""
 
     content = f"# Agents readme\n{BEGIN_MARKER}\nuser wrote this\nmore text\n"
+    target = tmp_path / "AGENTS.md"
+    target.write_text(content, encoding="utf-8")
 
-    stripped = CodexMemoryPlugin._strip_existing_block(content)
+    with pytest.raises(MalformedMemoryMarkersError, match="malformed CAO memory markers"):
+        CodexMemoryPlugin()._write_block(target, "")
 
-    assert BEGIN_MARKER not in stripped
-    assert "user wrote this" in stripped
-    assert "more text" in stripped
+    assert target.read_text(encoding="utf-8") == content
 
 
 def test_write_block_is_atomic_no_tmp_left_behind(tmp_path: Path) -> None:

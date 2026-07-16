@@ -45,7 +45,7 @@ def dispatch_plugin_event(
 async def dispatch_plugin_event_strict(
     registry: PluginRegistry | None, event_type: str, event: CaoEvent
 ) -> None:
-    """Await a required plugin barrier and propagate any handler failure."""
+    """Await an optional strict extension phase and propagate handler failures."""
     if registry is None:
         return
     await registry.dispatch_strict(event_type, event)

@@ -13,10 +13,14 @@ All events inherit from `CaoEvent`:
 | `session_id` | `str \| None` | Populated when the event originates from a known CAO session; `None` otherwise. |
 
 Observer events use the `post_` prefix and fire after the operation succeeds. The one
-exception is `pre_initialize_terminal`: an awaited, strict security barrier after
-terminal persistence and before provider startup. Its failures abort terminal creation.
+exception is `pre_initialize_terminal`: an awaited, strict extension phase after
+terminal persistence and core-owned provider-memory preparation, but before provider
+startup. When a registry is supplied, its handler failures abort terminal creation.
+Built-in provider-memory safety does not depend on this optional extension phase.
 
-Dispatch is fire-and-forget: exceptions raised inside a hook are caught by the registry and logged as warnings, never propagated back into CAO. No ordering is guaranteed across hooks or plugins.
+Observer dispatch is fire-and-forget: exceptions are caught and logged. The strict
+`pre_initialize_terminal` dispatch propagates handler failures. No ordering is
+guaranteed across hooks or plugins.
 
 ## Event catalog
 
@@ -83,8 +87,9 @@ Use cases: per-agent observability, provider-specific setup, external inventory 
 
 ### `pre_initialize_terminal`
 
-Fires after terminal metadata is persisted and before provider initialization. It is
-strict and awaited in both synchronous and deferred initialization paths.
+Fires after terminal metadata is persisted and core provider-memory preparation has
+completed, but before provider initialization. It is strict and awaited in both
+synchronous and deferred initialization paths when a registry is supplied.
 
 ```python
 @dataclass
@@ -95,8 +100,8 @@ class PreInitializeTerminalEvent(CaoEvent):
     provider: str = ""
 ```
 
-Use only for required provider-startup security preparation. A raised exception aborts
-terminal creation.
+Use for extension-specific provider-startup preparation. A raised exception aborts
+terminal creation. Do not use it to replace CAO's core provider-memory barrier.
 
 ### `post_kill_terminal`
 
