@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- self-healing pipe-pane liveness watchdog for silently-stalled FIFO forwarding (fixes #388) (#397), including detection of a stall that settles into a new static frame before the next poll and of a pipe that never delivers a single byte from terminal creation (cold start, harness-control#93) — see `CAO_PIPE_LIVENESS_COLD_START_GRACE_S` / `CAO_PIPE_LIVENESS_MAX_COLD_START_ATTEMPTS` in `docs/configuration.md`
 - web: attach web terminals through the configured backend so herdr-backed terminals no longer fail to attach (#417)
 - honor profile frontmatter `provider:` during install (flag > frontmatter > default) (#414)
 
@@ -30,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - add provider support (#272)
 
+- add script-tier workflows: a `.py` workflow spec is now runnable via `cao workflow run` (and the `workflow_run`/`workflow_cancel` MCP tools), with the same `resume`/`cancel`/`status` support as YAML workflows — tier is detected automatically from the file extension (#312)
+- add optional `skills` field to `AgentProfile` to scope the per-agent skill catalog via an fnmatch allowlist; runtime-prompt providers only, `load_skill` resolution unchanged (#351)
 - add herdr terminal backend with event-driven inbox delivery (#271)
 
 - bundle built-in memory plugins for Claude Code, Kiro, and Codex (#269)
