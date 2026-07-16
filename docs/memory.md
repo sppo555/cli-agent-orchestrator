@@ -12,8 +12,9 @@ CAO's memory system gives agents persistent, cross-session storage. Agents store
 - **Search**: keyword (BM25), recency, or hybrid; results ranked by recency, a
   composite 3-factor score (BM25 + recency + usage), or usage.
 - **Cross-references** between related memories, expandable on recall.
-- **Auto-injection** into each provider's config file on terminal creation, plus a
-  `<cao-memory>` block prepended to the agent's first message.
+- **Auto-injection** of project/global memory into each repo-shared provider config
+  file on terminal creation, plus a terminal-private `<cao-memory>` block prepended
+  to the agent's first message.
 - **LLM wiki compaction** (`cao memory compact`) that rewrites topic articles.
 - **Linting** (`cao memory lint`) for orphans, contradictions, stale claims, and more.
 - **Self-healing** (`cao memory heal`) that turns lint findings into fixes — dry-run
@@ -97,8 +98,10 @@ metadata. Neither command prints memory bodies.
 CAO also refreshes provider-native derivative copies before Codex, Claude Code, or Kiro
 starts. This preparation is owned by the core terminal lifecycle, independent of plugin
 registry presence or built-in plugin discovery, and runs before both synchronous and
-deferred provider initialization. An empty current context removes an old CAO-managed
-block from `AGENTS.md` or `.claude/CLAUDE.md`, or deletes Kiro's dedicated
+deferred provider initialization. Because these files are shared by every terminal in a
+repository, their managed context contains only `project` and valid `global` memories;
+terminal-private `session` and `agent` memories never enter this channel. An empty current
+context removes an old CAO-managed block from `AGENTS.md` or `.claude/CLAUDE.md`, or deletes Kiro's dedicated
 `.kiro/steering/cao-memory.md`; surrounding user-authored instructions are preserved.
 Path, malformed-marker, or write failures abort provider startup rather than allowing
 stale instructions to load. Malformed Codex/Claude blocks remain byte-identical for
@@ -362,11 +365,14 @@ parse/validate/secret pipeline and reports without writing.
 CAO injects relevant memories into a new session two ways:
 
 1. **First-message block** — when an agent receives its first message in a session,
-   CAO prepends a `<cao-memory>` block containing relevant memories.
+   CAO prepends a terminal-private `<cao-memory>` block containing `session`,
+   `project`, and valid `global` memories.
 2. **Provider config file** — built-in plugins for Claude Code, Codex, and Kiro CLI
-   write the same block into each provider's per-project config file (e.g.
-   `.claude/CLAUDE.md`) on terminal creation, delimited by `cao-memory` markers so
-   repeated runs overwrite the same section.
+   write a repo-shared block containing only `project` and valid `global` memories
+   into each provider's per-project config file (e.g. `.claude/CLAUDE.md`) on
+   terminal creation, delimited by `cao-memory` markers so repeated runs overwrite
+   the same section. `session` and `agent` memory are hard-excluded because
+   concurrent terminals can read the same file.
 
 The block format:
 
@@ -381,10 +387,12 @@ The block format:
 <original user message>
 ```
 
-Memories are selected in scope precedence order: `session` > `project` > `global`. Each
-scope is independently capped — at most `MEMORY_MAX_PER_SCOPE` (10) entries and
+For first-message injection, memories are selected in scope precedence order:
+`session` > `project` > `global`. Provider files use `project` > `global`. Each scope is
+independently capped — at most `MEMORY_MAX_PER_SCOPE` (10) entries and
 `MEMORY_SCOPE_BUDGET_CHARS` (1000) characters per scope — so one scope cannot monopolize
-the injection budget.
+the injection budget. Project/global duplication across the two channels is intentional;
+it preserves provider-native startup context without exposing terminal-private state.
 
 ## Saving Memories
 

@@ -62,7 +62,7 @@ async def test_writes_memory_block_on_post_create_terminal(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>\n## Context\n- stan prefers pytest\n</cao-memory>"
 
     monkeypatch.setattr(
@@ -110,7 +110,7 @@ async def test_replaces_existing_memory_block_on_rerun(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>NEW</cao-memory>"
 
     monkeypatch.setattr(
@@ -149,7 +149,7 @@ async def test_skips_write_when_memory_context_empty(
     )
     monkeypatch.setattr(
         "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
-        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, t: ""})(),
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, t: ""})(),
     )
 
     plugin = CodexMemoryPlugin()
@@ -183,7 +183,7 @@ async def test_empty_context_scrubs_stale_block_and_preserves_user_bytes(
     )
     monkeypatch.setattr(
         "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
-        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, _t: ""})(),
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, _t: ""})(),
     )
 
     await CodexMemoryPlugin().on_post_create_terminal(_event())
@@ -202,7 +202,7 @@ async def test_empty_context_leaves_unmanaged_file_byte_identical(
     monkeypatch.setattr(plugin, "_validated_target_path", lambda _working_directory: target)
     monkeypatch.setattr(
         "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
-        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, _t: ""})(),
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, _t: ""})(),
     )
 
     plugin.prepare("t1", str(tmp_path))
@@ -266,7 +266,7 @@ async def test_memory_fetch_failure_is_logged_not_raised(
     )
 
     class ExplodingMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             raise RuntimeError("db on fire")
 
     monkeypatch.setattr(
@@ -339,7 +339,7 @@ async def test_path_containment_guard_rejects_escape(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>NEW</cao-memory>"
 
     monkeypatch.setattr(
@@ -403,7 +403,7 @@ async def test_missing_working_dir_does_not_escape_handler(
         lambda: type(
             "F",
             (),
-            {"get_memory_context_for_terminal": lambda self, t: "<cao-memory>X</cao-memory>"},
+            {"get_provider_file_memory_context": lambda self, t: "<cao-memory>X</cao-memory>"},
         )(),
     )
 

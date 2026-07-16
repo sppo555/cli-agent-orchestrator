@@ -59,7 +59,7 @@ async def test_protected_production_path_prepares_before_first_provider_read(
         target.write_text(stale, encoding="utf-8")
 
     memory = MagicMock()
-    memory.get_memory_context_for_terminal.return_value = (
+    memory.get_provider_file_memory_context.return_value = (
         "<cao-memory>fresh scoped context</cao-memory>"
     )
     monkeypatch.setattr(

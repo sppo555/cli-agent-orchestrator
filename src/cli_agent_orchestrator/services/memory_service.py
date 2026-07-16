@@ -2694,11 +2694,47 @@ class MemoryService:
         if not terminal_context:
             return ""
 
-        scopes_in_order = [
-            MemoryScope.SESSION.value,
-            MemoryScope.PROJECT.value,
-            MemoryScope.GLOBAL.value,
-        ]
+        return self._build_memory_context(
+            terminal_context,
+            [
+                MemoryScope.SESSION.value,
+                MemoryScope.PROJECT.value,
+                MemoryScope.GLOBAL.value,
+            ],
+            budget_chars,
+        )
+
+    def get_provider_file_memory_context(
+        self,
+        terminal_id: str,
+        budget_chars: int = 3000,
+    ) -> str:
+        """Build repo-shared provider context from project + global scopes only.
+
+        Provider-native files are shared by every terminal using a repository.
+        Session and agent-private memory must therefore never enter this channel;
+        terminal-specific delivery remains the first-message injection path.
+        """
+        if not _is_memory_enabled():
+            return ""
+
+        terminal_context = self._get_terminal_context(terminal_id)
+        if not terminal_context:
+            return ""
+
+        return self._build_memory_context(
+            terminal_context,
+            [MemoryScope.PROJECT.value, MemoryScope.GLOBAL.value],
+            budget_chars,
+        )
+
+    def _build_memory_context(
+        self,
+        terminal_context: dict,
+        scopes_in_order: list[str],
+        budget_chars: int,
+    ) -> str:
+        """Render an explicitly scoped memory context with isolated budgets."""
 
         scope_char_cap = min(
             MEMORY_SCOPE_BUDGET_CHARS,

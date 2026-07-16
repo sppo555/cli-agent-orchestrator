@@ -261,7 +261,7 @@ async def test_malformed_provider_markers_abort_before_provider_construction(
     original = target.read_bytes()
 
     memory = MagicMock()
-    memory.get_memory_context_for_terminal.return_value = ""
+    memory.get_provider_file_memory_context.return_value = ""
     monkeypatch.setattr(
         f"cli_agent_orchestrator.plugins.builtin.{module_name}.MemoryService",
         lambda: memory,

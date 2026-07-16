@@ -1,8 +1,10 @@
 """Codex CLI memory-injection plugin (built-in).
 
-Before provider initialization for a ``codex`` terminal, writes the CAO memory
-context block into ``<cwd>/AGENTS.md``, replacing any prior block delimited by
-the cao-memory markers. Codex CLI reads ``AGENTS.md`` from the working
+Before provider initialization for a ``codex`` terminal, writes the repo-safe
+CAO project/global memory context block into ``<cwd>/AGENTS.md``, replacing any
+prior block delimited by the cao-memory markers. Session and agent-private memory
+are excluded because the file is shared by concurrent terminals. Codex CLI reads
+``AGENTS.md`` from the working
 directory as project instructions, so the injected block is picked up
 automatically on startup.
 
@@ -43,7 +45,7 @@ AGENTS_FILENAME = "AGENTS.md"
 
 
 class CodexMemoryPlugin(CaoPlugin):
-    """Inject CAO memory into the per-project AGENTS.md on terminal creation."""
+    """Inject repo-safe CAO memory into AGENTS.md on terminal creation."""
 
     async def setup(self) -> None:
         """Nothing to configure; plugin is stateless."""
@@ -99,7 +101,7 @@ class CodexMemoryPlugin(CaoPlugin):
         """Synchronize the managed block, scrubbing stale data on empty/error."""
         target = self._validated_target_path(working_directory)
         try:
-            context_block = MemoryService().get_memory_context_for_terminal(terminal_id)
+            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
         except Exception:
             # Fail safe: a context-read outage must not preserve a derivative
             # stale block. Path/write errors still propagate to the pre-start

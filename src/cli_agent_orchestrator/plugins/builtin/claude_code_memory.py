@@ -1,8 +1,10 @@
 """Claude Code memory-injection plugin (built-in).
 
-Before provider initialization for a ``claude_code`` terminal, writes the CAO
-memory context block into ``<cwd>/.claude/CLAUDE.md``, replacing any prior
-block delimited by the cao-memory markers.
+Before provider initialization for a ``claude_code`` terminal, writes the
+repo-safe CAO project/global memory context block into
+``<cwd>/.claude/CLAUDE.md``, replacing any prior block delimited by the
+cao-memory markers. Session and agent-private memory are excluded because the
+file is shared by concurrent terminals.
 
 The core terminal lifecycle invokes ``prepare`` as a required security barrier;
 plugin discovery is not part of that guarantee. Path, marker, and write failures
@@ -37,7 +39,7 @@ CLAUDE_DIR = ".claude"
 
 
 class ClaudeCodeMemoryPlugin(CaoPlugin):
-    """Inject CAO memory into the per-project CLAUDE.md on terminal creation."""
+    """Inject repo-safe CAO memory into CLAUDE.md on terminal creation."""
 
     async def setup(self) -> None:
         """Nothing to configure; plugin is stateless."""
@@ -93,7 +95,7 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
         """Synchronize the managed block, scrubbing stale data on empty/error."""
         target = self._validated_target_path(working_directory)
         try:
-            context_block = MemoryService().get_memory_context_for_terminal(terminal_id)
+            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
         except Exception:
             logger.warning("claude_code_memory: memory fetch failed; scrubbing managed block")
             context_block = ""

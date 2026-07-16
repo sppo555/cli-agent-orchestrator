@@ -440,6 +440,75 @@ class TestLegacyReadIsolation:
         assert "valid shared reference" in context_b
         assert "legacy private project body" not in context_b
 
+    def test_provider_file_context_excludes_session_but_terminal_context_keeps_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Repo-shared and terminal-specific builders enforce different ownership."""
+
+        svc, _ = _service(tmp_path)
+        repo = tmp_path / "shared-repo"
+        repo.mkdir()
+        ctx_a = {
+            "cwd": str(repo),
+            "session_name": "cao-session-a",
+            "agent_profile": "developer",
+            "caller_scope": "project",
+        }
+        ctx_b = {**ctx_a, "session_name": "cao-session-b"}
+
+        _run(
+            svc.store(
+                content="session alpha private",
+                scope="session",
+                memory_type="project",
+                key="session-alpha",
+                terminal_context=ctx_a,
+            )
+        )
+        _run(
+            svc.store(
+                content="session beta private",
+                scope="session",
+                memory_type="project",
+                key="session-beta",
+                terminal_context=ctx_b,
+            )
+        )
+        _run(
+            svc.store(
+                content="common project context",
+                scope="project",
+                memory_type="project",
+                key="shared-project",
+                terminal_context=ctx_a,
+            )
+        )
+        _run(
+            svc.store(
+                content="common global context",
+                scope="global",
+                memory_type="reference",
+                key="shared-global",
+            )
+        )
+
+        contexts = {"term-a": ctx_a, "term-b": ctx_b}
+        with patch.object(svc, "_get_terminal_context", side_effect=contexts.get):
+            provider_a = svc.get_provider_file_memory_context("term-a", budget_chars=12000)
+            provider_b = svc.get_provider_file_memory_context("term-b", budget_chars=12000)
+            terminal_a = svc.get_memory_context_for_terminal("term-a", budget_chars=12000)
+            terminal_b = svc.get_memory_context_for_terminal("term-b", budget_chars=12000)
+
+        assert provider_a == provider_b
+        assert "common project context" in provider_a
+        assert "common global context" in provider_a
+        assert "session alpha private" not in provider_a
+        assert "session beta private" not in provider_a
+        assert "session alpha private" in terminal_a
+        assert "session beta private" not in terminal_a
+        assert "session beta private" in terminal_b
+        assert "session alpha private" not in terminal_b
+
     def test_audit_is_read_only_and_quarantine_requires_apply(self, tmp_path: Path) -> None:
         svc, engine = _service(tmp_path)
         source = _seed_legacy_global_project(svc)
