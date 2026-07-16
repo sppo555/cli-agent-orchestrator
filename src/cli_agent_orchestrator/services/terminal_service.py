@@ -98,11 +98,30 @@ def nudge_terminal_render(terminal_id: str) -> bool:
     No text or control input is sent to the agent.
     """
     if get_backend().supports_event_inbox():
+        logger.debug("Skipping unattended redraw for event-driven terminal %s", terminal_id)
         return False
     metadata = get_terminal_metadata(terminal_id)
     if not metadata:
+        logger.warning("Unattended redraw failed for terminal %s: metadata not found", terminal_id)
         return False
-    return nudge_unattended_render(metadata["tmux_session"], metadata["tmux_window"])
+    session = metadata["tmux_session"]
+    window = metadata["tmux_window"]
+    ok = nudge_unattended_render(session, window)
+    if ok:
+        logger.info(
+            "Unattended redraw succeeded terminal=%s session=%s window=%s",
+            terminal_id,
+            session,
+            window,
+        )
+    else:
+        logger.warning(
+            "Unattended redraw failed terminal=%s session=%s window=%s",
+            terminal_id,
+            session,
+            window,
+        )
+    return ok
 
 
 def inject_memory_context(first_message: str, terminal_id: str) -> str:

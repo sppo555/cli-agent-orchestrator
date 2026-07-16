@@ -1,4 +1,4 @@
-"""Force an unattended tmux worker pane to render during initialization.
+"""Force an unattended tmux worker pane to render when its TUI goes quiet.
 
 Root cause (custom 4.13): a tmux window that no client is currently viewing
 does not flush its TUI redraws through ``pipe-pane``. The Ink-based Claude Code
@@ -11,16 +11,19 @@ receives its dispatched task — unless a human happens to open the Web terminal
 sat at ``UNKNOWN`` for the full init timeout and only reached IDLE within
 seconds of a viewer attaching.
 
-Fix: for the duration of init, attach a short-lived HEADLESS PTY client to the
+Init fix: for the duration of init, attach a short-lived HEADLESS PTY client to the
 worker window — the same grouped-viewer-session mechanism the Web terminal uses
 (see ``api/main.py``), sized to match the pane so it does not reflow — AND
 periodically toggle its size by one row to fire a SIGWINCH re-render. A passive
 attach alone is not enough: the CLI paints its idle frame once (buried in the
 launch burst) then goes quiet, and the StatusMonitor can miss it; the periodic
 SIGWINCH makes the CLI repaint its current frame, so once it settles to idle a
-clean idle box flows through ``pipe-pane`` and the status flips. The viewer is
-detached as soon as init returns; during an active task the CLI emits output
-continuously, so no viewer is needed to keep status flowing after init.
+clean idle box flows through ``pipe-pane`` and the status flips.
+
+Post-init recovery: a continued terminal can also finish a turn without its
+final ready frame reaching ``pipe-pane``. Inbox reconciliation briefly attaches
+a non-periodic viewer and performs a shrink/restore pair of SIGWINCH redraws.
+Both lifecycles avoid agent input and are limited to the tmux backend.
 
 Only relevant to the pipe-pane (tmux) backend; the herdr backend delivers status
 via its own socket events and is never routed here.
@@ -42,6 +45,11 @@ import time
 import uuid
 from contextlib import contextmanager
 from typing import Iterator, Tuple
+
+from cli_agent_orchestrator.constants import (
+    INBOX_REDRAW_NUDGE_GAP_SECONDS,
+    INBOX_REDRAW_SETTLE_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +93,7 @@ class _RenderViewer:
         except (ValueError, IndexError, OSError):
             return _DEFAULT_COLS, _DEFAULT_ROWS
 
-    def start(self) -> bool:
+    def start(self, *, periodic_nudge: bool = True) -> bool:
         """Attach the headless viewer. Best-effort: returns False on any failure."""
         try:
             cols, rows = self._pane_size()
@@ -135,8 +143,9 @@ class _RenderViewer:
             )
             self._drain = threading.Thread(target=self._drain_loop, daemon=True)
             self._drain.start()
-            self._nudge = threading.Thread(target=self._nudge_loop, daemon=True)
-            self._nudge.start()
+            if periodic_nudge:
+                self._nudge = threading.Thread(target=self._nudge_loop, daemon=True)
+                self._nudge.start()
             logger.debug(
                 "render-viewer %s attached to %s:%s (%dx%d)",
                 self._viewer_session,
@@ -251,7 +260,13 @@ def render_during_init(session: str, window: str) -> Iterator[None]:
         viewer.stop()
 
 
-def nudge_unattended_render(session: str, window: str, settle_seconds: float = 0.25) -> bool:
+def nudge_unattended_render(
+    session: str,
+    window: str,
+    *,
+    nudge_gap_seconds: float = INBOX_REDRAW_NUDGE_GAP_SECONDS,
+    settle_seconds: float = INBOX_REDRAW_SETTLE_SECONDS,
+) -> bool:
     """Attach briefly and force one redraw for a quiescent unattended terminal.
 
     This is the post-init counterpart to :func:`render_during_init`.  It is
@@ -260,12 +275,17 @@ def nudge_unattended_render(session: str, window: str, settle_seconds: float = 0
     through tmux ``pipe-pane`` to the StatusMonitor.
     """
     viewer = _RenderViewer(session, window)
-    if not viewer.start():
+    if not viewer.start(periodic_nudge=False):
         return False
     try:
-        nudged = viewer.nudge_once()
-        if nudged and settle_seconds > 0:
+        if not viewer.nudge_once(shrink=True):
+            return False
+        if nudge_gap_seconds > 0:
+            time.sleep(nudge_gap_seconds)
+        if not viewer.nudge_once(shrink=False):
+            return False
+        if settle_seconds > 0:
             time.sleep(settle_seconds)
-        return nudged
+        return True
     finally:
         viewer.stop()

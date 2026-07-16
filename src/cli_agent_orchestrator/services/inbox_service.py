@@ -17,6 +17,8 @@ from cli_agent_orchestrator.clients.database import (
 )
 from cli_agent_orchestrator.constants import (
     EAGER_INBOX_DELIVERY,
+    INBOX_REDRAW_COOLDOWN_SECONDS,
+    INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
     INBOX_RECONCILE_GRACE_SECONDS,
 )
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
@@ -30,9 +32,6 @@ from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.utils.event import terminal_id_from_topic
 
 logger = logging.getLogger(__name__)
-
-_REDRAW_COOLDOWN_SECONDS = 60.0
-
 
 class InboxService:
     """Delivers one pending message per terminal per IDLE cycle."""
@@ -183,10 +182,34 @@ class InboxService:
                 # resized.  The resulting status event drives normal delivery.
                 if status_monitor.get_status(terminal_id) == TerminalStatus.PROCESSING:
                     now = time.monotonic()
-                    last = self._last_redraw_nudge.get(terminal_id, 0.0)
-                    if now - last >= _REDRAW_COOLDOWN_SECONDS:
-                        self._last_redraw_nudge[terminal_id] = now
-                        terminal_service.nudge_terminal_render(terminal_id)
+                    last = self._last_redraw_nudge.get(terminal_id)
+                    elapsed = INBOX_REDRAW_COOLDOWN_SECONDS if last is None else now - last
+                    if elapsed >= INBOX_REDRAW_COOLDOWN_SECONDS:
+                        logger.info(
+                            "Requesting unattended redraw terminal=%s status=processing "
+                            "reason=stale_pending_processing",
+                            terminal_id,
+                        )
+                        ok = terminal_service.nudge_terminal_render(terminal_id)
+                        if ok:
+                            self._last_redraw_nudge[terminal_id] = now
+                        else:
+                            self._last_redraw_nudge[terminal_id] = (
+                                now
+                                - INBOX_REDRAW_COOLDOWN_SECONDS
+                                + INBOX_REDRAW_FAIL_COOLDOWN_SECONDS
+                            )
+                            logger.warning(
+                                "Unattended redraw request failed terminal=%s; retry_after_s=%s",
+                                terminal_id,
+                                INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
+                            )
+                    else:
+                        logger.debug(
+                            "Skipping unattended redraw cooldown terminal=%s remaining_s=%.1f",
+                            terminal_id,
+                            INBOX_REDRAW_COOLDOWN_SECONDS - elapsed,
+                        )
             except Exception as e:
                 logger.debug(f"Inbox reconciliation failed for {terminal_id}: {e}")
 

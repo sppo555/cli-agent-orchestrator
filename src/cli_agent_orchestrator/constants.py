@@ -223,6 +223,14 @@ INBOX_RECONCILE_INTERVAL = 30  # seconds between reconciliation sweeps
 # and missed.
 INBOX_RECONCILE_GRACE_SECONDS = 30
 
+# Recovery for unattended tmux TUIs whose final ready frame did not reach
+# pipe-pane. Successful redraws use the long cooldown; failed attach/redraw
+# attempts retry sooner without hammering tmux every reconciliation tick.
+INBOX_REDRAW_COOLDOWN_SECONDS = 60
+INBOX_REDRAW_FAIL_COOLDOWN_SECONDS = 15
+INBOX_REDRAW_NUDGE_GAP_SECONDS = 0.4
+INBOX_REDRAW_SETTLE_SECONDS = 1.0
+
 # =============================================================================
 # Cleanup Service Configuration
 # =============================================================================
