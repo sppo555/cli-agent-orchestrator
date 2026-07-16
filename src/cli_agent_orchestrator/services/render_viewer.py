@@ -267,12 +267,13 @@ def nudge_unattended_render(
     nudge_gap_seconds: float = INBOX_REDRAW_NUDGE_GAP_SECONDS,
     settle_seconds: float = INBOX_REDRAW_SETTLE_SECONDS,
 ) -> bool:
-    """Attach briefly and force one redraw for a quiescent unattended terminal.
+    """Attach briefly and force a shrink/restore redraw pair.
 
-    This is the post-init counterpart to :func:`render_during_init`.  It is
-    intentionally one-shot: inbox reconciliation applies its own cooldown, and
-    a resize redraw is sufficient to make the current idle/completed frame flow
-    through tmux ``pipe-pane`` to the StatusMonitor.
+    This post-init counterpart to :func:`render_during_init` deliberately avoids
+    its periodic nudge thread. It shrinks the grouped viewer by one row, restores
+    the original size after a short gap, and remains attached for the settle
+    interval so the current idle/completed frame can flow through tmux
+    ``pipe-pane``. Inbox reconciliation owns success/failure cooldowns.
     """
     viewer = _RenderViewer(session, window)
     if not viewer.start(periodic_nudge=False):
