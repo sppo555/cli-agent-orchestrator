@@ -506,6 +506,23 @@ class TestCodexProviderCodexProfile:
         assert "--no-alt-screen" in command
         assert "--disable shell_snapshot" in command
 
+    def test_structured_command_is_separate_from_interactive_tui_flags(self):
+        provider = CodexProvider(
+            "abc12345",
+            "session",
+            "window",
+            agent_profile=None,
+            allowed_tools=None,
+        )
+        with patch.object(
+            provider,
+            "_build_codex_command",
+            return_value="codex --yolo --no-alt-screen --disable shell_snapshot",
+        ):
+            command = provider.build_structured_command()
+
+        assert command == ["codex", "exec", "--json", "--ephemeral", "--yolo"]
+
     @patch("cli_agent_orchestrator.providers.codex.load_agent_profile")
     def test_codex_profile_composes_with_mcp_overrides(self, mock_load):
         # Regression guard: --profile <name> must still be followed by the

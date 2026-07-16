@@ -1120,7 +1120,16 @@ class TestClaudeCodeProviderMisc:
         command = provider._build_claude_command()
 
         assert "claude --dangerously-skip-permissions" in command
+        assert "--session-id" in command
+        assert provider._build_claude_command() == command
         assert "--permission-mode" not in command
+
+    def test_build_structured_command_uses_print_json_without_changing_interactive_command(self):
+        provider = ClaudeCodeProvider("test123", "test-session", "window-0")
+        command = provider.build_structured_command()
+
+        assert command[:3] == ["claude", "-p", "--dangerously-skip-permissions"]
+        assert command[-2:] == ["--output-format", "json"]
 
     @patch("cli_agent_orchestrator.providers.claude_code.load_agent_profile")
     def test_build_claude_command_with_system_prompt(self, mock_load):
@@ -1330,6 +1339,25 @@ class TestClaudeCodeProviderModelFlag:
         command = provider._build_claude_command()
 
         assert "--model" not in command
+
+
+class TestClaudeCodeProviderEffortFlag:
+    """Tests that profile.effort is forwarded to Claude Code via --effort."""
+
+    @patch("cli_agent_orchestrator.providers.claude_code.load_agent_profile")
+    def test_build_command_appends_effort_when_set(self, mock_load):
+        mock_profile = MagicMock()
+        mock_profile.model = None
+        mock_profile.effort = "high"
+        mock_profile.system_prompt = None
+        mock_profile.mcpServers = None
+        mock_profile.permissionMode = None
+        mock_load.return_value = mock_profile
+
+        provider = ClaudeCodeProvider("tid", "sess", "win", "agent")
+        command = provider._build_claude_command()
+
+        assert "--effort high" in command
 
 
 class TestClaudeCodeProviderPermissionMode:

@@ -5,7 +5,7 @@ import logging
 import re
 import shlex
 import time
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.models.terminal import TerminalStatus
@@ -233,6 +233,15 @@ class ProviderError(Exception):
 class CodexProvider(BaseProvider):
     """Provider for Codex CLI tool integration."""
 
+    # Opt in to pyte rendered-screen status detection (StatusMonitor routes here
+    # only when CAO_PYTE_STATUS is on). Codex's progress footer
+    # "• Working (Ns • esc to interrupt)" is reliably intact on a composited
+    # frame, but gets split across in-place repaints on the raw pipe-pane
+    # stream — which made get_status() miss the spinner and the footer's idle
+    # "›" trip a false COMPLETED ~60-75s in (handoff then returned a half-done
+    # result and auto-deleted the terminal). See get_status_from_screen.
+    supports_screen_detection = True
+
     def __init__(
         self,
         terminal_id: str,
@@ -365,6 +374,28 @@ class CodexProvider(BaseProvider):
                     command_parts.extend(["-c", _toml_override(key, value)])
 
         return shlex.join(command_parts)
+
+    def build_structured_command(self) -> list[str]:
+        """Build the non-interactive Codex JSONL command.
+
+        This is a separate launch contract from the tmux/TUI command above.
+        The structured worker consumes stdout events from the exec command; it
+        never reads terminal scrollback.
+        """
+        interactive_parts = shlex.split(self._build_codex_command())
+        command_parts = [interactive_parts[0], "exec", "--json", "--ephemeral"]
+        skip_next = False
+        for part in interactive_parts[1:]:
+            if skip_next:
+                skip_next = False
+                continue
+            if part == "--no-alt-screen":
+                continue
+            if part == "--disable":
+                skip_next = True
+                continue
+            command_parts.append(part)
+        return command_parts
 
     async def _handle_trust_prompt(self, timeout: float = 20.0) -> None:
         """Auto-accept the workspace trust prompt if it appears.
@@ -557,6 +588,38 @@ class CodexProvider(BaseProvider):
         # If we're not at an idle prompt and we don't see explicit errors/permission prompts,
         # assume the CLI is still producing output.
         return TerminalStatus.PROCESSING
+
+    def get_status_from_screen(self, screen_lines: List[str]) -> TerminalStatus:
+        """Detect status from a pyte-composited viewport (escape-free rows).
+
+        ``screen_lines`` is ``pyte.Screen.display`` — the rendered screen a human
+        actually sees, with in-place repaints already applied. The StatusMonitor
+        only calls this on settled / rising-edge frames (quiescence debounce).
+
+        The single reason codex needs the screen path: its live progress footer
+        ``• Working (Ns • esc to interrupt)`` (TUI_PROGRESS_PATTERN) is whole on a
+        composited frame but is shredded by cursor sequences / partial repaints on
+        the raw stream, so the raw get_status() missed it and the always-rendered
+        ``›`` idle hint read as COMPLETED mid-task. Here we give the spinner
+        absolute precedence first, then defer to the existing, tested get_status
+        logic on the clean text (idle/completed/waiting/error all unchanged).
+        """
+        rows = [ln.rstrip() for ln in screen_lines if ln.strip()]
+        if not rows:
+            return TerminalStatus.UNKNOWN
+
+        # Spinner precedence: a live "(Ns • esc to interrupt)" footer anywhere in
+        # the bottom region means genuinely working — never COMPLETED. On the
+        # composited frame this line is intact, so the match is reliable (which is
+        # exactly what the raw path could not guarantee).
+        bottom = "\n".join(rows[-12:])
+        if re.search(TUI_PROGRESS_PATTERN, bottom, re.MULTILINE):
+            return TerminalStatus.PROCESSING
+
+        # No live spinner: the clean rendered text is what get_status was always
+        # trying to reconstruct, so reuse it wholesale (strip_terminal_escapes is
+        # a no-op on already-clean rows).
+        return self.get_status("\n".join(rows))
 
     def extract_last_message_from_script(self, script_output: str) -> str:
         """Extract Codex's final response from terminal output.

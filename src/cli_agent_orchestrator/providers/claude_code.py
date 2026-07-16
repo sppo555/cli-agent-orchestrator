@@ -17,6 +17,7 @@ from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import CAO_HOME_DIR
 from cli_agent_orchestrator.models.terminal import TerminalStatus
 from cli_agent_orchestrator.providers.base import BaseProvider
+from cli_agent_orchestrator.services.interactive_token_usage import claude_usage_session_id
 from cli_agent_orchestrator.services.settings_service import get_server_settings
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
 from cli_agent_orchestrator.utils.mcp_resolution import resolve_mcp_server_config
@@ -239,6 +240,16 @@ class ClaudeCodeProvider(BaseProvider):
         else:
             command_parts = ["claude", "--dangerously-skip-permissions"]
 
+        # Give every CAO terminal a deterministic Claude session UUID.  The
+        # interactive token tracker can then bind this exact worker to its
+        # provider-owned JSONL usage log even when several workers share a cwd.
+        command_parts.extend(
+            [
+                "--session-id",
+                claude_usage_session_id(self.terminal_id, self.session_name, self.window_name),
+            ]
+        )
+
         # Route based on profile state
         native = getattr(profile, "native_agent", None) if profile else None
         if profile is not None and isinstance(native, str) and native:
@@ -255,6 +266,13 @@ class ClaudeCodeProvider(BaseProvider):
             # Full CAO profile with config decomposition
             if profile.model:
                 command_parts.extend(["--model", profile.model])
+
+            # Per-agent reasoning effort via Claude Code's native --effort flag.
+            # Profile-scoped, so e.g. a reviewer can run at "high" while the
+            # supervisor stays at the default/global effort.
+            effort = getattr(profile, "effort", None)
+            if isinstance(effort, str) and effort.strip():
+                command_parts.extend(["--effort", effort])
 
             # Add system prompt - escape newlines to prevent tmux chunking issues
             system_prompt = profile.system_prompt if profile.system_prompt is not None else ""
@@ -338,6 +356,26 @@ class ClaudeCodeProvider(BaseProvider):
             ") 2>/dev/null"
         )
         return f"{unset_cmd}; {claude_cmd}"
+
+    def build_structured_command(self) -> list[str]:
+        """Build the non-interactive Claude JSON command.
+
+        The interactive command builder remains the source of profile,
+        permission, MCP, and system-prompt wiring. Only the launch contract is
+        changed here: print mode plus machine-readable JSON output.
+        """
+        shell_command = self._build_claude_command()
+        _, separator, claude_command = shell_command.partition("; ")
+        if not separator or not claude_command.startswith("claude"):
+            raise ProviderError("failed to build structured Claude command")
+        command_parts = shlex.split(claude_command)
+        return [
+            command_parts[0],
+            "-p",
+            *command_parts[1:],
+            "--output-format",
+            "json",
+        ]
 
     @staticmethod
     def _ensure_skip_bypass_prompt_setting() -> None:

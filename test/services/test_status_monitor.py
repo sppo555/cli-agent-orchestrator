@@ -37,6 +37,167 @@ class TestGetStatusTmux:
 
         assert sm.get_status("missing") == TerminalStatus.UNKNOWN
 
+    @patch("cli_agent_orchestrator.services.status_monitor.provider_manager")
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_cached_unknown_fresh_detects_ready_from_buffer(self, mock_get_backend, mock_pm):
+        """If the push pipeline only published initial UNKNOWN, polling must
+        still recover once the buffer contains a ready prompt.
+
+        This is the init-time case for TUI providers: wait_until_status polls
+        get_status(), and a missed quiescence/status edge must not strand the
+        terminal at UNKNOWN until provider initialization times out.
+        """
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        provider = MagicMock()
+        provider.supports_screen_detection = False
+        provider.get_status.return_value = TerminalStatus.IDLE
+        mock_pm.get_provider.return_value = provider
+
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.UNKNOWN
+        sm._buffers["t1"] = "ready prompt"
+
+        assert sm.get_status("t1") == TerminalStatus.IDLE
+        assert sm._last_status["t1"] == TerminalStatus.IDLE
+
+    @patch("cli_agent_orchestrator.services.status_monitor.provider_manager")
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_cached_unknown_falls_back_to_raw_when_screen_is_unknown(
+        self, mock_get_backend, mock_pm
+    ):
+        """Screen detection can miss a settled ready frame during init; polling
+        should use raw detection as a secondary signal instead of staying
+        UNKNOWN until initialization times out."""
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        provider = MagicMock()
+        provider.supports_screen_detection = True
+        provider.get_status.return_value = TerminalStatus.IDLE
+        mock_pm.get_provider.return_value = provider
+
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.UNKNOWN
+        sm._buffers["t1"] = "ready prompt"
+        sm._detect_screen = MagicMock(return_value=TerminalStatus.UNKNOWN)
+
+        assert sm.get_status("t1") == TerminalStatus.IDLE
+        assert sm._last_status["t1"] == TerminalStatus.IDLE
+        provider.get_status.assert_called_once_with("ready prompt")
+
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_armed_stale_completed_masked_as_processing(self, mock_get_backend):
+        """After input is sent, a previous-turn COMPLETED must not satisfy a
+        new wait_until_status(COMPLETED) before the new turn produces output."""
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.COMPLETED
+        sm.notify_input_sent("t1")
+
+        assert sm.get_status("t1") == TerminalStatus.PROCESSING
+
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_armed_stale_idle_masked_as_processing(self, mock_get_backend):
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.IDLE
+        sm.notify_input_sent("t1")
+
+        assert sm.get_status("t1") == TerminalStatus.PROCESSING
+
+    @patch("cli_agent_orchestrator.services.status_monitor.provider_manager")
+    @patch("cli_agent_orchestrator.services.status_monitor.time.monotonic")
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_armed_ready_stays_masked_during_grace(self, mock_get_backend, mock_monotonic, mock_pm):
+        """A stale ready re-render immediately after paste must stay masked
+        even if the buffer advanced."""
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        mock_monotonic.side_effect = [100.0, 100.1]
+        provider = MagicMock()
+        provider.supports_screen_detection = False
+        provider.get_status.return_value = TerminalStatus.COMPLETED
+        mock_pm.get_provider.return_value = provider
+
+        sm = StatusMonitor()
+        sm._buffers["t1"] = "previous completed"
+        sm._last_status["t1"] = TerminalStatus.COMPLETED
+        sm.notify_input_sent("t1")
+        sm._buffers["t1"] += "\nold ready rerender"
+
+        assert sm.get_status("t1") == TerminalStatus.PROCESSING
+        provider.get_status.assert_not_called()
+
+    @patch("cli_agent_orchestrator.services.status_monitor.provider_manager")
+    @patch("cli_agent_orchestrator.services.status_monitor.time.monotonic")
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_armed_direct_completion_after_new_output_clears_arm(
+        self, mock_get_backend, mock_monotonic, mock_pm
+    ):
+        """A legitimately fast turn can go ready without an observed PROCESSING
+        frame; once new output exists and the stale-frame grace elapsed, it must
+        not be permanently masked as PROCESSING."""
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        mock_monotonic.side_effect = [100.0, 100.6]
+        provider = MagicMock()
+        provider.supports_screen_detection = False
+        provider.get_status.return_value = TerminalStatus.COMPLETED
+        mock_pm.get_provider.return_value = provider
+
+        sm = StatusMonitor()
+        sm._buffers["t1"] = "previous completed"
+        sm._last_status["t1"] = TerminalStatus.COMPLETED
+        sm.notify_input_sent("t1")
+        sm._buffers["t1"] += "\nnew answer completed"
+
+        assert sm.get_status("t1") == TerminalStatus.COMPLETED
+        assert sm._allow_processing_revert["t1"] is False
+
+    @patch("cli_agent_orchestrator.services.status_monitor.provider_manager")
+    @patch("cli_agent_orchestrator.services.status_monitor.time.monotonic")
+    @patch("cli_agent_orchestrator.backends.registry.get_backend")
+    def test_armed_processing_after_new_output_clears_arm(
+        self, mock_get_backend, mock_monotonic, mock_pm
+    ):
+        mock_get_backend.return_value = _backend(event_inbox=False)
+        mock_monotonic.side_effect = [100.0, 100.6]
+        provider = MagicMock()
+        provider.supports_screen_detection = False
+        provider.get_status.return_value = TerminalStatus.PROCESSING
+        mock_pm.get_provider.return_value = provider
+
+        sm = StatusMonitor()
+        sm._buffers["t1"] = "previous completed"
+        sm._last_status["t1"] = TerminalStatus.COMPLETED
+        sm.notify_input_sent("t1")
+        sm._buffers["t1"] += "\nworking"
+
+        assert sm.get_status("t1") == TerminalStatus.PROCESSING
+        assert sm._last_status["t1"] == TerminalStatus.PROCESSING
+        assert sm._allow_processing_revert["t1"] is False
+
+    def test_processing_to_completed_schedules_native_usage_capture(self):
+        sm = StatusMonitor()
+        sm._last_status["t1"] = TerminalStatus.PROCESSING
+        sm._schedule_native_usage_capture = MagicMock()
+
+        sm._apply_detection("t1", TerminalStatus.COMPLETED)
+
+        sm._schedule_native_usage_capture.assert_called_once_with("t1", TerminalStatus.COMPLETED)
+
+    def test_native_usage_requires_processing_before_completed_claim(self):
+        sm = StatusMonitor()
+        module = "cli_agent_orchestrator.services.interactive_token_usage"
+        with (
+            patch(f"{module}.observe_interactive_usage_processing") as observe,
+            patch(f"{module}.claim_completed_interactive_usage_turn") as claim,
+        ):
+            sm._schedule_native_usage_capture("t1", TerminalStatus.COMPLETED)
+            claim.assert_called_once_with("t1")
+            observe.assert_not_called()
+
+            claim.reset_mock()
+            sm._schedule_native_usage_capture("t1", TerminalStatus.PROCESSING)
+            observe.assert_called_once_with("t1")
+            claim.assert_not_called()
+
 
 class TestGetStatusEventInbox:
     """Event-inbox backend (herdr): derive status on demand from the provider."""

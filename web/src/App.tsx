@@ -7,7 +7,7 @@ import { AgentPanel } from './components/AgentPanel'
 import { FlowsPanel } from './components/FlowsPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { SettingsPanel } from './components/SettingsPanel'
-import { Bot, Home, Clock, Settings, Brain, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
+import { Bot, Home, Clock, Settings, Brain, Code2, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
 
 type TabKey = 'home' | 'agents' | 'flows' | 'settings' | 'memory'
 
@@ -133,6 +133,13 @@ export default function App() {
                 )}
               </button>
             ))}
+            <a
+              href="/token.html"
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-gray-400 transition-all duration-200 hover:bg-gray-800/50 hover:text-white"
+            >
+              <Code2 size={16} aria-hidden="true" />
+              Token
+            </a>
           </nav>
         </div>
       </div>
