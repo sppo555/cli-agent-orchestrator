@@ -1258,8 +1258,17 @@ def delete_terminal(
 # =============================================================================
 
 
+MEMORY_TERMINAL_CONTEXT_ERROR = (
+    "CAO terminal identity could not be verified; memory operation refused"
+)
+
+
+class MemoryTerminalContextError(RuntimeError):
+    """Raised when a declared CAO terminal cannot be verified safely."""
+
+
 def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
-    """Build terminal context dict from the calling terminal's CAO_TERMINAL_ID."""
+    """Build a verified terminal context, failing closed when an ID is declared."""
     terminal_id = os.environ.get("CAO_TERMINAL_ID")
     if not terminal_id:
         return None
@@ -1268,6 +1277,13 @@ def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
         response = requests.get(f"{API_BASE_URL}/terminals/{terminal_id}", timeout=_mcp_timeout())
         response.raise_for_status()
         meta = response.json()
+        if not isinstance(meta, dict):
+            raise ValueError("terminal metadata is not an object")
+        if meta.get("id") != terminal_id:
+            raise ValueError("terminal metadata identity mismatch")
+        for required in ("session_name", "provider"):
+            if not isinstance(meta.get(required), str) or not meta[required].strip():
+                raise ValueError(f"terminal metadata missing {required}")
         ctx: Dict[str, Any] = {
             "terminal_id": meta["id"],
             "session_name": meta["session_name"],
@@ -1285,13 +1301,25 @@ def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
                 timeout=_mcp_timeout(),
             )
             if wd_resp.status_code == 200:
-                ctx["cwd"] = wd_resp.json().get("working_directory")
+                wd_meta = wd_resp.json()
+                cwd = wd_meta.get("working_directory") if isinstance(wd_meta, dict) else None
+                if isinstance(cwd, str) and cwd.strip():
+                    ctx["cwd"] = cwd
+                else:
+                    logger.warning("memory_terminal_working_directory_unavailable")
+            else:
+                logger.warning("memory_terminal_working_directory_unavailable")
         except Exception:
-            pass
+            # Identity remains verified and project-bounded. Without cwd,
+            # project stores fail later at scope-id resolution and global
+            # writes remain denied by caller_scope="project".
+            logger.warning("memory_terminal_working_directory_unavailable")
         return ctx
-    except Exception as e:
-        logger.warning(f"Failed to get terminal context for memory tools: {e}")
-        return None
+    except Exception:
+        # Never reinterpret a declared but unverifiable worker as an unbound
+        # operator. Keep the log and returned error free of response bodies.
+        logger.warning("memory_terminal_context_verification_failed")
+        raise MemoryTerminalContextError(MEMORY_TERMINAL_CONTEXT_ERROR)
 
 
 @mcp.tool()

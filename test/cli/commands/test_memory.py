@@ -14,6 +14,8 @@ from cli_agent_orchestrator.cli.commands.memory import (
     heal_cmd,
     lint_cmd,
     list_memories,
+    quarantine_global_project_cmd,
+    scope_audit_cmd,
     show,
 )
 from cli_agent_orchestrator.models.memory import Memory
@@ -565,3 +567,49 @@ class TestMemoryHeal:
 
         assert result.exit_code != 0
         assert "another heal is running" in result.output
+
+
+class TestScopeIsolationMaintenance:
+    @patch("cli_agent_orchestrator.cli.commands.memory._get_memory_service")
+    def test_scope_audit_json_lists_metadata_only(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_svc.audit_scope_isolation.return_value = [
+            {
+                "key": "legacy-project",
+                "scope": "global",
+                "scope_id": None,
+                "memory_type": "project",
+                "wiki_path": "/tmp/legacy-project.md",
+                "index_present": True,
+                "metadata_present": True,
+            }
+        ]
+        mock_get_svc.return_value = mock_svc
+
+        result = CliRunner().invoke(scope_audit_cmd, ["--format", "json"])
+
+        assert result.exit_code == 0
+        assert "legacy-project" in result.output
+        assert "memory body" not in result.output
+
+    @patch("cli_agent_orchestrator.cli.commands.memory._get_memory_service")
+    def test_quarantine_defaults_to_dry_run(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_svc.quarantine_global_project = AsyncMock(
+            return_value={
+                "key": "legacy-project",
+                "scope": "global",
+                "scope_id": None,
+                "memory_type": "project",
+                "source_path": "/tmp/live.md",
+                "quarantine_path": "/tmp/quarantine.md",
+                "applied": False,
+            }
+        )
+        mock_get_svc.return_value = mock_svc
+
+        result = CliRunner().invoke(quarantine_global_project_cmd, ["legacy-project"])
+
+        assert result.exit_code == 0
+        assert "DRY-RUN" in result.output
+        mock_svc.quarantine_global_project.assert_awaited_once_with("legacy-project", apply=False)

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+import requests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -42,6 +43,41 @@ def _metadata_rows(engine) -> list[MemoryMetadataModel]:
     Session = sessionmaker(bind=engine)
     with Session() as db:
         return list(db.query(MemoryMetadataModel).all())
+
+
+def _seed_legacy_global_project(svc: MemoryService, key: str = "legacy-project") -> Path:
+    """Create a pre-boundary polluted topic in an isolated test store."""
+    wiki_path = svc.get_wiki_path("global", None, key)
+    wiki_path.parent.mkdir(parents=True, exist_ok=True)
+    wiki_path.write_text(
+        f"# {key}\n"
+        "<!-- id: 00000000-0000-0000-0000-000000000001 | scope: global | "
+        "type: project | tags: legacy -->\n\n"
+        "## 2026-01-01T00:00:00Z\nlegacy private project body\n",
+        encoding="utf-8",
+    )
+    svc._update_index(
+        "global",
+        None,
+        key,
+        "project",
+        "legacy",
+        "legacy private project body",
+        "2026-01-01T00:00:00Z",
+        "add",
+    )
+    svc._upsert_metadata(
+        key=key,
+        memory_type="project",
+        scope="global",
+        scope_id=None,
+        file_path=str(wiki_path),
+        tags="legacy",
+        source_provider=None,
+        source_terminal_id=None,
+        token_estimate=4,
+    )
+    return wiki_path
 
 
 class TestGlobalProjectBoundary:
@@ -226,3 +262,212 @@ class TestTerminalCallerScope:
         from cli_agent_orchestrator.mcp_server.server import _get_terminal_context_from_env
 
         assert _get_terminal_context_from_env() is None
+
+    @pytest.mark.parametrize(
+        "failure",
+        [requests.Timeout("timeout"), requests.ConnectionError("refused")],
+    )
+    @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    def test_terminal_lookup_transport_failure_is_fail_closed(
+        self, mock_get: Mock, failure: Exception
+    ) -> None:
+        from cli_agent_orchestrator.mcp_server.server import (
+            MEMORY_TERMINAL_CONTEXT_ERROR,
+            MemoryTerminalContextError,
+            _get_terminal_context_from_env,
+        )
+
+        mock_get.side_effect = failure
+        with pytest.raises(MemoryTerminalContextError, match=MEMORY_TERMINAL_CONTEXT_ERROR):
+            _get_terminal_context_from_env()
+
+    @pytest.mark.parametrize("status", [404, 500])
+    @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    def test_terminal_lookup_http_failure_is_fail_closed(self, mock_get: Mock, status: int) -> None:
+        from cli_agent_orchestrator.mcp_server.server import (
+            MemoryTerminalContextError,
+            _get_terminal_context_from_env,
+        )
+
+        response = Mock(status_code=status)
+        response.raise_for_status.side_effect = requests.HTTPError(f"status {status}")
+        mock_get.return_value = response
+        with pytest.raises(MemoryTerminalContextError):
+            _get_terminal_context_from_env()
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [None, [], {}, {"id": "wrong", "session_name": "s", "provider": "codex"}],
+    )
+    @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    def test_malformed_or_incomplete_terminal_metadata_is_fail_closed(
+        self, mock_get: Mock, metadata: object
+    ) -> None:
+        from cli_agent_orchestrator.mcp_server.server import (
+            MemoryTerminalContextError,
+            _get_terminal_context_from_env,
+        )
+
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = metadata
+        mock_get.return_value = response
+        with pytest.raises(MemoryTerminalContextError):
+            _get_terminal_context_from_env()
+
+    @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    def test_working_directory_failure_stays_project_bounded(self, mock_get: Mock) -> None:
+        from cli_agent_orchestrator.mcp_server.server import _get_terminal_context_from_env
+
+        terminal_response = Mock()
+        terminal_response.raise_for_status.return_value = None
+        terminal_response.json.return_value = {
+            "id": "term-project-worker",
+            "session_name": "scope-isolation",
+            "provider": "codex",
+        }
+        mock_get.side_effect = [terminal_response, requests.Timeout("cwd timeout")]
+
+        context = _get_terminal_context_from_env()
+
+        assert context == {
+            "terminal_id": "term-project-worker",
+            "session_name": "scope-isolation",
+            "provider": "codex",
+            "agent_profile": None,
+            "caller_scope": "project",
+        }
+
+    @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
+    @patch("cli_agent_orchestrator.services.memory_service.MemoryService")
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    def test_mcp_returns_structured_identity_failure_without_storing(
+        self, mock_service_class: Mock, mock_get: Mock
+    ) -> None:
+        from cli_agent_orchestrator.mcp_server.server import (
+            MEMORY_TERMINAL_CONTEXT_ERROR,
+            memory_store,
+        )
+
+        service = mock_service_class.return_value
+        service.store = AsyncMock()
+        mock_get.side_effect = requests.Timeout("response body must not escape")
+
+        result = _run(
+            memory_store(
+                content="sensitive project content",
+                scope="project",
+                memory_type="project",
+                key="identity-failure",
+            )
+        )
+
+        assert result == {"success": False, "error": MEMORY_TERMINAL_CONTEXT_ERROR}
+        service.store.assert_not_awaited()
+
+
+class TestLegacyReadIsolation:
+    def test_legacy_global_project_is_filtered_but_valid_global_remains(
+        self, tmp_path: Path
+    ) -> None:
+        svc, _ = _service(tmp_path)
+        _seed_legacy_global_project(svc)
+        _run(
+            svc.store(
+                content="valid shared reference",
+                scope="global",
+                memory_type="reference",
+                key="shared-reference",
+            )
+        )
+
+        memories = _run(svc.recall(scope="global", limit=20, scan_all=True, search_mode="metadata"))
+
+        assert [memory.key for memory in memories] == ["shared-reference"]
+
+    def test_two_projects_receive_only_own_project_and_valid_global(self, tmp_path: Path) -> None:
+        svc, _ = _service(tmp_path)
+        repo_a = tmp_path / "repo-a"
+        repo_b = tmp_path / "repo-b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+        ctx_a = {"cwd": str(repo_a), "caller_scope": "project"}
+        ctx_b = {"cwd": str(repo_b), "caller_scope": "project"}
+
+        _run(
+            svc.store(
+                content="project alpha only",
+                scope="project",
+                memory_type="project",
+                key="alpha",
+                terminal_context=ctx_a,
+            )
+        )
+        _run(
+            svc.store(
+                content="project beta only",
+                scope="project",
+                memory_type="project",
+                key="beta",
+                terminal_context=ctx_b,
+            )
+        )
+        _run(
+            svc.store(
+                content="valid shared reference",
+                scope="global",
+                memory_type="reference",
+                key="shared-reference",
+            )
+        )
+        _seed_legacy_global_project(svc)
+
+        with patch.object(svc, "_get_terminal_context", return_value=ctx_a):
+            context_a = svc.get_memory_context_for_terminal("term-a", budget_chars=12000)
+        with patch.object(svc, "_get_terminal_context", return_value=ctx_b):
+            context_b = svc.get_memory_context_for_terminal("term-b", budget_chars=12000)
+
+        assert "project alpha only" in context_a
+        assert "project beta only" not in context_a
+        assert "valid shared reference" in context_a
+        assert "legacy private project body" not in context_a
+        assert "project beta only" in context_b
+        assert "project alpha only" not in context_b
+        assert "valid shared reference" in context_b
+        assert "legacy private project body" not in context_b
+
+    def test_audit_is_read_only_and_quarantine_requires_apply(self, tmp_path: Path) -> None:
+        svc, engine = _service(tmp_path)
+        source = _seed_legacy_global_project(svc)
+        before = source.read_bytes()
+
+        findings = svc.audit_scope_isolation()
+        dry_run = _run(svc.quarantine_global_project("legacy-project"))
+
+        assert findings == [
+            {
+                "key": "legacy-project",
+                "scope": "global",
+                "scope_id": None,
+                "memory_type": "project",
+                "wiki_path": str(source),
+                "index_present": True,
+                "metadata_present": True,
+            }
+        ]
+        assert dry_run["applied"] is False
+        assert source.read_bytes() == before
+        assert len(_metadata_rows(engine)) == 1
+        assert not Path(dry_run["quarantine_path"]).exists()
+
+        applied = _run(svc.quarantine_global_project("legacy-project", apply=True))
+
+        assert applied["applied"] is True
+        assert not source.exists()
+        assert Path(applied["quarantine_path"]).read_bytes() == before
+        assert "legacy-project" not in svc.get_index_path("global", None).read_text()
+        assert _metadata_rows(engine) == []

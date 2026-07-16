@@ -36,6 +36,9 @@ decisions, slices, milestones, and acceptance results **must** use `project` sco
 coordination state must use `session`. Reserve `global` for cross-project user preferences
 and universally applicable CAO operating rules. Never store project-specific content in
 global scope. When uncertain, use `project`; do not widen scope speculatively.
+CAO rejects the invalid `global` + `project` type pairing on both write and read. A
+terminal-bound MCP caller whose `CAO_TERMINAL_ID` cannot be verified is refused; it is
+never treated as an unbound operator.
 
 ## Recall — check memory BEFORE asking the user
 

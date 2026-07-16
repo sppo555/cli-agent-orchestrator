@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -42,6 +43,11 @@ class MemoryDisabledError(RuntimeError):
     Read paths (recall, get_memory_context_for_terminal) instead return an
     empty result, since silent empty reads are a safer no-op than raising.
     """
+
+
+def _is_invalid_global_project(scope: str, memory_type: str) -> bool:
+    """Return whether a scope/type pair violates the isolation boundary."""
+    return scope == MemoryScope.GLOBAL.value and memory_type == MemoryType.PROJECT.value
 
 
 def _is_memory_enabled() -> bool:
@@ -606,6 +612,131 @@ class MemoryService:
         project_dir = self._get_project_dir(scope, scope_id)
         return project_dir / "wiki" / "index.md"
 
+    def audit_scope_isolation(self) -> list[dict[str, Any]]:
+        """Read-only inventory of legacy ``global``/``project`` topics.
+
+        The report deliberately contains metadata and paths only. Memory body
+        bytes are neither returned nor logged.
+        """
+        global_dir = self.base_dir / "global" / "wiki" / MemoryScope.GLOBAL.value
+        if not global_dir.is_dir():
+            return []
+
+        index_entries: set[str] = set()
+        index_path = self.get_index_path(MemoryScope.GLOBAL.value, None)
+        if index_path.exists():
+            index_entries = {
+                entry["key"]
+                for entry in self._parse_index(index_path)
+                if entry.get("scope") == MemoryScope.GLOBAL.value
+                and entry.get("memory_type") == MemoryType.PROJECT.value
+            }
+
+        metadata_keys: set[str] = set()
+        try:
+            from cli_agent_orchestrator.clients.database import MemoryMetadataModel
+
+            with self._get_db_session() as db:
+                rows = (
+                    db.query(MemoryMetadataModel.key)
+                    .filter(
+                        MemoryMetadataModel.scope == MemoryScope.GLOBAL.value,
+                        MemoryMetadataModel.memory_type == MemoryType.PROJECT.value,
+                        MemoryMetadataModel.scope_id.is_(None),
+                    )
+                    .all()
+                )
+                metadata_keys = {row[0] for row in rows}
+        except Exception:
+            logger.warning("memory_scope_audit_metadata_unavailable")
+
+        findings: list[dict[str, Any]] = []
+        for wiki_path in sorted(global_dir.glob("*.md")):
+            try:
+                with wiki_path.open(encoding="utf-8") as topic_file:
+                    header = topic_file.read(4096)
+            except OSError:
+                logger.warning("memory_scope_audit_topic_unreadable key=%s", wiki_path.stem)
+                continue
+            scope_match = re.search(r"scope: (\S+)", header)
+            type_match = re.search(r"type: (\S+)", header)
+            scope = scope_match.group(1).rstrip(" |") if scope_match else ""
+            memory_type = type_match.group(1).rstrip(" |") if type_match else ""
+            if not _is_invalid_global_project(scope, memory_type):
+                continue
+            findings.append(
+                {
+                    "key": wiki_path.stem,
+                    "scope": scope,
+                    "scope_id": None,
+                    "memory_type": memory_type,
+                    "wiki_path": str(wiki_path),
+                    "index_present": wiki_path.stem in index_entries,
+                    "metadata_present": wiki_path.stem in metadata_keys,
+                }
+            )
+        return findings
+
+    async def quarantine_global_project(self, key: str, apply: bool = False) -> dict[str, Any]:
+        """Plan or quarantine one invalid legacy global/project topic.
+
+        Dry-run is the default. Applying copies the topic into a dedicated
+        quarantine tree before using ``forget`` to remove the live wiki,
+        index, and SQLite metadata through the normal service path.
+        """
+        key = self._sanitize_key(key)
+        source = self.get_wiki_path(MemoryScope.GLOBAL.value, None, key)
+        if not source.exists():
+            raise ValueError(f"legacy global/project memory {key!r} not found")
+
+        file_content = source.read_text(encoding="utf-8")
+        scope_match = re.search(r"scope: (\S+)", file_content)
+        type_match = re.search(r"type: (\S+)", file_content)
+        scope = scope_match.group(1).rstrip(" |") if scope_match else ""
+        memory_type = type_match.group(1).rstrip(" |") if type_match else ""
+        if not _is_invalid_global_project(scope, memory_type):
+            raise ValueError(f"memory {key!r} is not a legacy global/project topic")
+
+        target = Path(
+            safe_join_under_base(
+                str(self.base_dir),
+                "quarantine",
+                "global-project",
+                f"{key}.md",
+                description="quarantine path component",
+            )
+        )
+        report = {
+            "key": key,
+            "scope": scope,
+            "scope_id": None,
+            "memory_type": memory_type,
+            "source_path": str(source),
+            "quarantine_path": str(target),
+            "applied": apply,
+        }
+        if not apply:
+            return report
+        if target.exists():
+            raise ValueError(f"quarantine target already exists for {key!r}")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_target = target.parent / f".{key}.tmp"
+        shutil.copy2(source, tmp_target)
+        os.replace(tmp_target, target)
+        try:
+            removed = await self.forget(key, scope=MemoryScope.GLOBAL.value, scope_id=None)
+            if not removed:
+                raise RuntimeError(f"failed to remove live memory {key!r} after quarantine copy")
+        except Exception:
+            # If the live source still exists, the copy was only preparatory
+            # and can be rolled back. If forget already removed it, retain the
+            # quarantine copy so memory content is never lost.
+            if source.exists():
+                target.unlink(missing_ok=True)
+            raise
+        return report
+
     # -------------------------------------------------------------------------
     # Store
     # -------------------------------------------------------------------------
@@ -672,7 +803,7 @@ class MemoryService:
         # this check immediately after enum validation and before scope
         # resolution or any filesystem/SQLite work so creates and updates
         # fail closed through the same boundary.
-        if scope == MemoryScope.GLOBAL.value and memory_type == MemoryType.PROJECT.value:
+        if _is_invalid_global_project(scope, memory_type):
             logger.warning("memory_scope_type_rejected scope=global type=project")
             raise ValueError(
                 "memory_type 'project' cannot be stored in global scope; " "use scope='project'"
@@ -2439,6 +2570,16 @@ class MemoryService:
         # Clean up scope/type that may have trailing pipe
         scope = scope.rstrip(" |")
         memory_type = memory_type.rstrip(" |")
+
+        # Legacy pollution predating the store boundary must never enter a
+        # normal recall, related-memory expansion, or terminal injection.
+        # Keep this guard in the shared parser so all consumers fail closed.
+        if _is_invalid_global_project(scope, memory_type):
+            logger.warning(
+                "legacy_global_project_memory_skipped key=%s",
+                entry.get("key", wiki_file.stem),
+            )
+            return None
 
         # Extract all timestamped entries
         timestamps = re.findall(r"## (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)", file_content)

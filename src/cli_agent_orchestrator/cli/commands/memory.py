@@ -222,6 +222,83 @@ def clear(scope, yes):
     click.echo(f"Cleared {deleted_count} {scope}-scoped memory(ies).")
 
 
+@memory.command(name="scope-audit")
+@click.option(
+    "--format",
+    "out_format",
+    type=click.Choice(["table", "json"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format.",
+)
+def scope_audit_cmd(out_format):
+    """Report legacy global/project topics without changing runtime memory."""
+    import json as _json
+
+    svc = _get_memory_service()
+    try:
+        findings = svc.audit_scope_isolation()
+    except Exception as e:
+        raise click.ClickException(f"scope audit failed: {e}")
+
+    if out_format.lower() == "json":
+        click.echo(_json.dumps(findings, indent=2))
+        return
+    if not findings:
+        click.echo("No legacy global/project memories found.")
+        return
+
+    header = f"{'KEY':<32} {'INDEX':<7} {'SQLITE':<7} WIKI PATH"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for item in findings:
+        click.echo(
+            f"{item['key']:<32} "
+            f"{str(item['index_present']):<7} "
+            f"{str(item['metadata_present']):<7} "
+            f"{item['wiki_path']}"
+        )
+
+
+@memory.command(name="quarantine-global-project")
+@click.argument("key")
+@click.option(
+    "--apply",
+    "do_apply",
+    is_flag=True,
+    default=False,
+    help="Apply quarantine. Without this flag, prints a dry-run plan only.",
+)
+@click.option(
+    "--format",
+    "out_format",
+    type=click.Choice(["table", "json"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format.",
+)
+def quarantine_global_project_cmd(key, do_apply, out_format):
+    """Quarantine one legacy global/project topic; dry-run by default."""
+    import json as _json
+
+    _validate_key(key)
+    svc = _get_memory_service()
+    try:
+        report = _run_async(svc.quarantine_global_project(key, apply=do_apply))
+    except Exception as e:
+        raise click.ClickException(f"quarantine failed: {e}")
+
+    if out_format.lower() == "json":
+        click.echo(_json.dumps(report, indent=2))
+        return
+    action = "QUARANTINED" if report["applied"] else "DRY-RUN"
+    click.echo(f"{action}: {report['key']}")
+    click.echo(f"Source:     {report['source_path']}")
+    click.echo(f"Quarantine: {report['quarantine_path']}")
+    if not report["applied"]:
+        click.echo("No files or metadata were changed. Pass --apply to quarantine.")
+
+
 @memory.command(name="lint")
 @click.option(
     "--scope",

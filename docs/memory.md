@@ -87,6 +87,13 @@ source of "where did my memory go?" questions.
 > `scope="global"` + `memory_type="project"`; the store boundary rejects it before
 > writing any wiki, index, or SQLite data.
 
+Legacy topics created with that invalid pairing are also rejected at the shared read
+parser, so they cannot appear in recall, related-memory expansion, BM25 results, or
+terminal context injection. `cao memory scope-audit` inventories such topics without
+changing them; `cao memory quarantine-global-project KEY` previews an explicit
+quarantine operation and requires `--apply` before it changes the wiki, index, or SQLite
+metadata. Neither command prints memory bodies.
+
 ## Memory Scopes
 
 Scope controls where a memory is stored and who can read it back.
@@ -109,6 +116,12 @@ other scope requires a resolvable id, taken from the terminal's context — `pro
 `realpath(cwd)`, `session` from `session_name`, `agent` from `agent_profile`. If a
 non-`global`/non-`federated` store can't resolve an id, it raises `ValueError` rather
 than writing to the wrong place.
+
+For MCP calls, an absent `CAO_TERMINAL_ID` is explicit operator mode. If the variable is
+present, CAO must verify the terminal metadata before any memory operation; lookup errors,
+HTTP failures, identity mismatches, and malformed metadata fail closed instead of falling
+back to operator permissions. A working-directory lookup failure retains a project-bounded
+caller but leaves project storage unavailable until a cwd can be resolved.
 
 > **Note:** `session` and `agent` scopes are stored *under* the `global` container,
 > nested by their `scope_id`. Only `project` and `federated` get their own top-level
@@ -271,6 +284,14 @@ cao memory delete <key> --scope project --yes
 
 # Clear all memories for a scope
 cao memory clear --scope session --yes
+
+# Audit legacy invalid global/project topics (read-only)
+cao memory scope-audit
+cao memory scope-audit --format json
+
+# Preview quarantine (default), then explicitly apply one finding
+cao memory quarantine-global-project <key>
+cao memory quarantine-global-project <key> --apply
 
 # Lint the wiki for orphans, contradictions, stale claims, etc.
 cao memory lint
