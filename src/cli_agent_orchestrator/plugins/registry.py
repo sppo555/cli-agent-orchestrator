@@ -73,6 +73,15 @@ class PluginRegistry:
                     exc_info=True,
                 )
 
+    async def dispatch_strict(self, event_type: str, event: CaoEvent) -> None:
+        """Dispatch a required pre-start event and propagate hook failures.
+
+        Unlike observer events, security preparation must complete before a
+        provider starts. A handler failure therefore aborts terminal creation.
+        """
+        for handler in self._dispatch.get(event_type, []):
+            await handler(event)
+
     async def teardown(self) -> None:
         """Call teardown() on every loaded plugin, continuing after failures."""
 

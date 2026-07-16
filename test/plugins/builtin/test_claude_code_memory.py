@@ -160,6 +160,59 @@ async def test_skips_write_when_memory_context_empty(
 
 
 @pytest.mark.asyncio
+async def test_empty_context_scrubs_stale_block_and_preserves_user_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".claude" / "CLAUDE.md"
+    target.parent.mkdir()
+    prefix = "# User instructions\nkeep-before\n"
+    suffix = "\nkeep-after\n"
+    target.write_text(
+        prefix + f"{BEGIN_MARKER}\nlegacy cross-project memory\n{END_MARKER}" + suffix,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.claude_code_memory.get_terminal_metadata",
+        lambda _terminal_id: {
+            "tmux_session": "cao-test-session",
+            "tmux_window": "developer-abcd",
+        },
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.claude_code_memory.tmux_client.get_pane_working_directory",
+        lambda _session, _window: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.claude_code_memory.MemoryService",
+        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, _t: ""})(),
+    )
+
+    await ClaudeCodeMemoryPlugin().on_post_create_terminal(_event())
+
+    assert target.read_text(encoding="utf-8") == prefix + suffix
+
+
+@pytest.mark.asyncio
+async def test_empty_context_leaves_unmanaged_file_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".claude" / "CLAUDE.md"
+    target.parent.mkdir()
+    original = b"# User only\nspacing-is-preserved  \n"
+    target.write_bytes(original)
+    plugin = ClaudeCodeMemoryPlugin()
+    monkeypatch.setattr(plugin, "_validated_target_path", lambda _working_directory: target)
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.claude_code_memory.MemoryService",
+        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, _t: ""})(),
+    )
+
+    plugin.prepare("t1", str(tmp_path))
+
+    assert target.read_bytes() == original
+
+
+@pytest.mark.asyncio
 async def test_disabled_memory_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

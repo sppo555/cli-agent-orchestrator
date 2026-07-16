@@ -9,6 +9,7 @@ from cli_agent_orchestrator.plugins.events import (
     PostKillSessionEvent,
     PostKillTerminalEvent,
     PostSendMessageEvent,
+    PreInitializeTerminalEvent,
 )
 
 
@@ -46,6 +47,12 @@ class TestEventDefaults:
         event = PostCreateTerminalEvent()
 
         assert event.event_type == "post_create_terminal"
+        assert event.session_id is None
+
+    def test_pre_initialize_terminal_event_defaults(self) -> None:
+        event = PreInitializeTerminalEvent()
+
+        assert event.event_type == "pre_initialize_terminal"
         assert event.session_id is None
 
     def test_post_kill_terminal_event_defaults(self) -> None:

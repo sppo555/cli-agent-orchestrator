@@ -12,7 +12,9 @@ All events inherit from `CaoEvent`:
 | `timestamp` | `datetime` | Timezone-aware UTC, set at event construction. |
 | `session_id` | `str \| None` | Populated when the event originates from a known CAO session; `None` otherwise. |
 
-All concrete events use the `post_` prefix to signal that they fire *after* the underlying operation has succeeded. There are no `pre_*` hooks today — a plugin cannot veto or mutate an operation in v1.
+Observer events use the `post_` prefix and fire after the operation succeeds. The one
+exception is `pre_initialize_terminal`: an awaited, strict security barrier after
+terminal persistence and before provider startup. Its failures abort terminal creation.
 
 Dispatch is fire-and-forget: exceptions raised inside a hook are caught by the registry and logged as warnings, never propagated back into CAO. No ordering is guaranteed across hooks or plugins.
 
@@ -79,6 +81,23 @@ class PostCreateTerminalEvent(CaoEvent):
 
 Use cases: per-agent observability, provider-specific setup, external inventory of running agents.
 
+### `pre_initialize_terminal`
+
+Fires after terminal metadata is persisted and before provider initialization. It is
+strict and awaited in both synchronous and deferred initialization paths.
+
+```python
+@dataclass
+class PreInitializeTerminalEvent(CaoEvent):
+    event_type: str = "pre_initialize_terminal"
+    terminal_id: str = ""
+    agent_name: str | None = None
+    provider: str = ""
+```
+
+Use only for required provider-startup security preparation. A raised exception aborts
+terminal creation.
+
 ### `post_kill_terminal`
 
 Fires after a CAO terminal is successfully killed.
@@ -101,13 +120,14 @@ Use cases: per-agent cleanup, alerting on abnormal terminal exit (when combined 
 | `post_create_session` | `PostCreateSessionEvent` | `session_name` |
 | `post_kill_session` | `PostKillSessionEvent` | `session_name` |
 | `post_create_terminal` | `PostCreateTerminalEvent` | `terminal_id`, `agent_name`, `provider` |
+| `pre_initialize_terminal` | `PreInitializeTerminalEvent` | `terminal_id`, `agent_name`, `provider` |
 | `post_kill_terminal` | `PostKillTerminalEvent` | `terminal_id`, `agent_name` |
 
 ## Not yet supported
 
 The following are explicitly out of scope in v1 (see `docs/feat-plugin-hooks-design.md` §2 for context). Do not write a plugin that depends on them today.
 
-- **`pre_*` hooks** — no pre-event variants; plugins cannot veto or transform operations.
+- **Additional `pre_*` hooks** — only `pre_initialize_terminal` is supported.
 - **Per-hook filtering / priority** — all hooks for an event type receive all events; execution order is unordered.
 - **Sync hooks** — all hooks must be `async def`.
 - **Provider, flow, error, or MCP tool-invocation events** — not emitted today.

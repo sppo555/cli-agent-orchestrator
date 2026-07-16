@@ -159,6 +159,28 @@ async def test_skips_write_when_memory_context_empty(
 
 
 @pytest.mark.asyncio
+async def test_empty_context_removes_stale_managed_file_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    steering = tmp_path / STEERING_SUBDIR
+    steering.mkdir(parents=True)
+    target = steering / MEMORY_FILENAME
+    target.write_text("legacy cross-project memory\n", encoding="utf-8")
+    identity = steering / "agent-identity.md"
+    identity.write_bytes(b"user identity bytes\n")
+    _install_metadata_and_cwd(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.kiro_cli_memory.MemoryService",
+        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, _t: ""})(),
+    )
+
+    await KiroCliMemoryPlugin().on_post_create_terminal(_event())
+
+    assert not target.exists()
+    assert identity.read_bytes() == b"user identity bytes\n"
+
+
+@pytest.mark.asyncio
 async def test_disabled_memory_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

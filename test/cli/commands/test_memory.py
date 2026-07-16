@@ -15,6 +15,7 @@ from cli_agent_orchestrator.cli.commands.memory import (
     lint_cmd,
     list_memories,
     quarantine_global_project_cmd,
+    scrub_provider_files_cmd,
     scope_audit_cmd,
     show,
 )
@@ -613,3 +614,23 @@ class TestScopeIsolationMaintenance:
         assert result.exit_code == 0
         assert "DRY-RUN" in result.output
         mock_svc.quarantine_global_project.assert_awaited_once_with("legacy-project", apply=False)
+
+    @patch("cli_agent_orchestrator.services.provider_memory_files.scrub_provider_memory_files")
+    def test_provider_file_scrub_defaults_to_dry_run(self, mock_scrub, tmp_path):
+        mock_scrub.return_value = {
+            "project_dir": str(tmp_path),
+            "applied": False,
+            "findings": [
+                {
+                    "provider": "codex",
+                    "ownership": "managed-block",
+                    "path": str(tmp_path / "AGENTS.md"),
+                }
+            ],
+        }
+
+        result = CliRunner().invoke(scrub_provider_files_cmd, [str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "DRY-RUN" in result.output
+        mock_scrub.assert_called_once_with(tmp_path, apply=False)

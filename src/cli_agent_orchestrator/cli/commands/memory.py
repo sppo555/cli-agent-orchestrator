@@ -299,6 +299,48 @@ def quarantine_global_project_cmd(key, do_apply, out_format):
         click.echo("No files or metadata were changed. Pass --apply to quarantine.")
 
 
+@memory.command(name="scrub-provider-files")
+@click.argument("project_dir", type=click.Path(path_type=Path, exists=True, file_okay=False))
+@click.option(
+    "--apply",
+    "do_apply",
+    is_flag=True,
+    default=False,
+    help="Apply cleanup. Without this flag, prints a dry-run inventory only.",
+)
+@click.option(
+    "--format",
+    "out_format",
+    type=click.Choice(["table", "json"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format.",
+)
+def scrub_provider_files_cmd(project_dir, do_apply, out_format):
+    """Audit or scrub CAO-managed provider instruction copies for PROJECT_DIR."""
+    import json as _json
+
+    from cli_agent_orchestrator.services.provider_memory_files import scrub_provider_memory_files
+
+    try:
+        report = scrub_provider_memory_files(project_dir, apply=do_apply)
+    except Exception as e:
+        raise click.ClickException(f"provider-file scrub failed: {e}")
+
+    if out_format.lower() == "json":
+        click.echo(_json.dumps(report, indent=2))
+        return
+    action = "SCRUBBED" if report["applied"] else "DRY-RUN"
+    click.echo(f"{action}: {report['project_dir']}")
+    if not report["findings"]:
+        click.echo("No CAO-managed provider memory files found.")
+        return
+    for finding in report["findings"]:
+        click.echo(f"{finding['provider']:<12} {finding['ownership']:<13} {finding['path']}")
+    if not report["applied"]:
+        click.echo("No files were changed. Pass --apply to scrub these managed copies.")
+
+
 @memory.command(name="lint")
 @click.option(
     "--scope",

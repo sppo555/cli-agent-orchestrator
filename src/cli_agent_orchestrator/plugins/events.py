@@ -67,6 +67,16 @@ class PostCreateTerminalEvent(CaoEvent):
 
 
 @dataclass
+class PreInitializeTerminalEvent(CaoEvent):
+    """Security barrier emitted after terminal persistence but before provider startup."""
+
+    event_type: str = "pre_initialize_terminal"
+    terminal_id: str = ""
+    agent_name: str | None = None
+    provider: str = ""
+
+
+@dataclass
 class PostKillTerminalEvent(CaoEvent):
     """Emitted after a CAO terminal is killed."""
 

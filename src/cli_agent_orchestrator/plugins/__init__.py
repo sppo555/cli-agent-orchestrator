@@ -3,6 +3,7 @@
 from cli_agent_orchestrator.plugins.base import CaoPlugin, hook
 from cli_agent_orchestrator.plugins.events import (
     CaoEvent,
+    PreInitializeTerminalEvent,
     PostCreateSessionEvent,
     PostCreateTerminalEvent,
     PostKillSessionEvent,
@@ -15,6 +16,7 @@ __all__ = [
     "CaoPlugin",
     "hook",
     "CaoEvent",
+    "PreInitializeTerminalEvent",
     "PostSendMessageEvent",
     "PostCreateSessionEvent",
     "PostKillSessionEvent",

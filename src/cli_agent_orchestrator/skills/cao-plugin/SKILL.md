@@ -130,8 +130,9 @@ Ship an `env.template` alongside the plugin if it reads env vars, documenting ev
 - `setup()` is awaited exactly once, after the plugin class is instantiated at server startup.
 - `teardown()` is awaited exactly once at server shutdown, only for plugins whose `setup()` succeeded.
 - There is no hot reload — changes to an installed plugin require restarting `cao-server`.
-- Event dispatch only happens *after* the underlying CAO operation succeeds (e.g. `post_create_terminal` fires after the terminal is persisted, not before).
-- There are no `pre_*` hooks today — you cannot veto or mutate an operation from a plugin.
+- Observer events dispatch after the operation succeeds. The sole required pre-event is
+  `pre_initialize_terminal`, a strict security barrier after terminal persistence and
+  before provider startup; failures abort terminal creation.
 
 ### 8. Dispatch semantics
 

@@ -94,6 +94,14 @@ changing them; `cao memory quarantine-global-project KEY` previews an explicit
 quarantine operation and requires `--apply` before it changes the wiki, index, or SQLite
 metadata. Neither command prints memory bodies.
 
+CAO also refreshes provider-native derivative copies before Codex, Claude Code, or Kiro
+starts. The required `pre_initialize_terminal` barrier runs before both synchronous and
+deferred provider initialization. An empty current context removes an old CAO-managed
+block from `AGENTS.md` or `.claude/CLAUDE.md`, or deletes Kiro's dedicated
+`.kiro/steering/cao-memory.md`; surrounding user-authored instructions are preserved.
+Path or write failures abort provider startup rather than allowing stale instructions to
+load.
+
 ## Memory Scopes
 
 Scope controls where a memory is stored and who can read it back.
@@ -292,6 +300,12 @@ cao memory scope-audit --format json
 # Preview quarantine (default), then explicitly apply one finding
 cao memory quarantine-global-project <key>
 cao memory quarantine-global-project <key> --apply
+
+# Audit derivative provider files for a known project path (dry-run)
+cao memory scrub-provider-files /path/to/project
+
+# Remove only CAO-managed blocks/files
+cao memory scrub-provider-files /path/to/project --apply
 
 # Lint the wiki for orphans, contradictions, stale claims, etc.
 cao memory lint

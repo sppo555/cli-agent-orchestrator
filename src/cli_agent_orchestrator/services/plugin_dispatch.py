@@ -40,3 +40,12 @@ def dispatch_plugin_event(
         asyncio.run(coroutine)
     else:
         loop.create_task(coroutine)
+
+
+async def dispatch_plugin_event_strict(
+    registry: PluginRegistry | None, event_type: str, event: CaoEvent
+) -> None:
+    """Await a required plugin barrier and propagate any handler failure."""
+    if registry is None:
+        return
+    await registry.dispatch_strict(event_type, event)

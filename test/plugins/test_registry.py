@@ -78,6 +78,19 @@ class TestPluginRegistryLoad:
         assert "Loaded CAO plugin: single-hook" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_strict_dispatch_propagates_required_hook_failure(self) -> None:
+        class RequiredPlugin(CaoPlugin):
+            @hook("pre_initialize_terminal")
+            async def prepare(self, _event) -> None:
+                raise RuntimeError("unsafe provider file")
+
+        registry = PluginRegistry()
+        registry._register(RequiredPlugin())
+
+        with pytest.raises(RuntimeError, match="unsafe provider file"):
+            await registry.dispatch_strict("pre_initialize_terminal", PostSendMessageEvent())
+
+    @pytest.mark.asyncio
     async def test_load_single_plugin_with_two_hooks_for_same_event_invokes_both(self) -> None:
         """Two hooks on the same plugin should both be registered and called."""
 

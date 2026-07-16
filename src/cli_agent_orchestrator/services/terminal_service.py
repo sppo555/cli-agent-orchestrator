@@ -45,12 +45,16 @@ from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PostKillTerminalEvent,
     PostSendMessageEvent,
+    PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.providers.manager import provider_manager
 from cli_agent_orchestrator.services.fifo_reader import fifo_manager
 from cli_agent_orchestrator.services.herdr_inbox_registry import get_herdr_inbox_service
 from cli_agent_orchestrator.services.memory_service import MemoryService
-from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
+from cli_agent_orchestrator.services.plugin_dispatch import (
+    dispatch_plugin_event,
+    dispatch_plugin_event_strict,
+)
 from cli_agent_orchestrator.services.session_env import (
     clear_session_env,
     get_session_env,
@@ -306,6 +310,24 @@ async def create_terminal(
             # the StatusMonitor buffer empty so wait_for_shell() times out. A bare
             # Enter produces a fresh prompt line that flows through the pipe.
             get_backend().send_special_key(session_name, window_name, "Enter")
+
+        # Required provider-instruction security barrier. Codex, Claude Code,
+        # and Kiro can read project-native instruction files during
+        # initialize(), so stale CAO-managed blocks must be refreshed or
+        # scrubbed before either the synchronous initialize call or deferred
+        # initialize task can begin. Strict dispatch propagates preparation
+        # failures and aborts terminal creation instead of launching with
+        # potentially contaminated instructions.
+        await dispatch_plugin_event_strict(
+            registry,
+            "pre_initialize_terminal",
+            PreInitializeTerminalEvent(
+                session_id=session_name,
+                terminal_id=terminal_id,
+                agent_name=agent_profile,
+                provider=provider,
+            ),
+        )
 
         # Step 6: Create and initialize the CLI provider
         # This starts the agent (e.g., runs "kiro-cli chat --agent developer").
