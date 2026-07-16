@@ -32,6 +32,7 @@ export default defineConfig({
       '/flows': { target: 'http://localhost:9889', changeOrigin: true },
       '/memory': { target: 'http://localhost:9889', changeOrigin: true },
       '/token-usage': { target: 'http://localhost:9889', changeOrigin: true },
+      '/graph': { target: 'http://localhost:9889', changeOrigin: true },
     },
   },
 })
