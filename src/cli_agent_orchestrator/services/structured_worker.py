@@ -17,6 +17,7 @@ from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStat
 from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.providers.claude_code import ClaudeCodeProvider
 from cli_agent_orchestrator.providers.codex import CodexProvider
+from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
 from cli_agent_orchestrator.services.token_usage import (
     estimate_token_usage,
     persist_worker_token_usage,
@@ -26,6 +27,7 @@ from cli_agent_orchestrator.services.token_usage import (
 from cli_agent_orchestrator.services.token_usage_adapters import (
     extract_claude_code_last_message,
     extract_codex_last_message,
+    extract_grok_cli_last_message,
 )
 from cli_agent_orchestrator.services.token_usage_contract import extract_usage
 
@@ -53,12 +55,12 @@ async def run_structured_worker_step(
 ) -> AgentStepResult:
     """Run one explicit structured worker step.
 
-    Claude Code and Codex each use their provider-owned machine-readable
+    Claude Code, Codex, and Grok each use their provider-owned machine-readable
     stdout contract. The default interactive run_agent_step path is not called
     or modified.
     """
 
-    if provider not in {"claude_code", "codex"}:
+    if provider not in {"claude_code", "codex", "grok_cli"}:
         raise StructuredWorkerError(
             f"structured worker mode is not enabled for provider '{provider}'"
         )
@@ -66,6 +68,7 @@ async def run_structured_worker_step(
         raise ValueError("timeout must be greater than zero")
 
     terminal_id = _structured_terminal_id()
+    command_builder: CodexProvider | ClaudeCodeProvider | GrokCliProvider
     if provider == "codex":
         command_builder = CodexProvider(
             terminal_id=terminal_id,
@@ -75,7 +78,7 @@ async def run_structured_worker_step(
             allowed_tools=allowed_tools,
         )
         extract_last_message = extract_codex_last_message
-    else:
+    elif provider == "claude_code":
         command_builder = ClaudeCodeProvider(
             terminal_id=terminal_id,
             session_name="structured",
@@ -84,6 +87,15 @@ async def run_structured_worker_step(
             allowed_tools=allowed_tools,
         )
         extract_last_message = extract_claude_code_last_message
+    else:
+        command_builder = GrokCliProvider(
+            terminal_id=terminal_id,
+            session_name="structured",
+            window_name="structured",
+            agent_profile=agent,
+            allowed_tools=allowed_tools,
+        )
+        extract_last_message = extract_grok_cli_last_message
 
     try:
         command = command_builder.build_structured_command()
@@ -107,9 +119,7 @@ async def run_structured_worker_step(
     except OSError as exc:
         if isinstance(command_builder, ClaudeCodeProvider):
             command_builder.cleanup()
-        raise StructuredWorkerError(
-            f"failed to start structured {provider} worker: {exc}"
-        ) from exc
+        raise StructuredWorkerError(f"failed to start structured {provider} worker: {exc}") from exc
 
     try:
         try:
@@ -120,9 +130,7 @@ async def run_structured_worker_step(
         except asyncio.TimeoutError as exc:
             process.kill()
             await process.communicate()
-            raise TimeoutError(
-                f"structured {provider} worker timed out after {timeout}s"
-            ) from exc
+            raise TimeoutError(f"structured {provider} worker timed out after {timeout}s") from exc
     finally:
         if isinstance(command_builder, ClaudeCodeProvider):
             command_builder.cleanup()

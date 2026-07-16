@@ -13,6 +13,7 @@ from cli_agent_orchestrator.models.terminal import TerminalStatus
 from cli_agent_orchestrator.providers.grok_cli import (
     _GROK_VERSION_CACHE,
     MAX_COMMAND_BYTES,
+    STARTUP_GUARD,
     GrokCliProvider,
     _probe_grok_version,
 )
@@ -95,6 +96,25 @@ def test_constructor_model_is_forwarded():
     with patch("cli_agent_orchestrator.providers.grok_cli.shutil.which", return_value="/bin/grok"):
         command = make_provider(model="grok-4.5")._build_grok_command()
     assert "--model grok-4.5" in command
+
+
+def test_build_structured_command_uses_attempt_local_streaming_json_without_startup_guard():
+    with (
+        patch("cli_agent_orchestrator.providers.grok_cli.shutil.which", return_value="/bin/grok"),
+        patch("cli_agent_orchestrator.providers.grok_cli.uuid.uuid4", return_value="attempt-id"),
+    ):
+        command = make_provider().build_structured_command()
+
+    assert command[0] == "/bin/grok"
+    assert command[-5:] == [
+        "--output-format",
+        "streaming-json",
+        "--session-id",
+        "attempt-id",
+        "--single",
+    ]
+    assert [*command, "do it"][-2:] == ["--single", "do it"]
+    assert STARTUP_GUARD not in command[command.index("--rules") + 1]
 
 
 def test_profile_model_precedes_constructor_model():

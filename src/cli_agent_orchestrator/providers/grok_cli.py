@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import textwrap
+import uuid
 from typing import List, Optional
 
 from cli_agent_orchestrator.backends.registry import get_backend
@@ -192,6 +193,30 @@ class GrokCliProvider(BaseProvider):
                 f"startup_guard={len(STARTUP_GUARD.encode('utf-8'))} bytes"
             )
         return rendered
+
+    def build_structured_command(self) -> list[str]:
+        """Build Grok's single-turn, process-local streaming JSON command."""
+
+        command = shlex.split(self._build_grok_command())
+        rules_index = command.index("--rules") + 1
+        rules = command[rules_index]
+        guard_suffix = f"\n\n{STARTUP_GUARD}"
+        if rules.endswith(guard_suffix):
+            command[rules_index] = rules[: -len(guard_suffix)]
+        elif rules == STARTUP_GUARD:
+            command[rules_index] = ""
+        command.extend(
+            [
+                "--output-format",
+                "streaming-json",
+                "--session-id",
+                str(uuid.uuid4()),
+                # The structured runner appends the prompt to argv. This
+                # value-taking flag must remain last so the prompt binds here.
+                "--single",
+            ]
+        )
+        return command
 
     async def initialize(self) -> bool:
         """Start Grok after capturing the shell baseline and wait for ready."""

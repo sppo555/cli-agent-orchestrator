@@ -26,6 +26,7 @@ def test_inventory_has_one_schema_complete_row_for_each_provider():
     } == {
         ProviderType.CLAUDE_CODE.value,
         ProviderType.CODEX.value,
+        ProviderType.GROK_CLI.value,
     }
     document = (
         Path(__file__).parents[2] / "CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md"

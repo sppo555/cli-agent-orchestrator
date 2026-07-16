@@ -60,6 +60,22 @@ class _ClaudeCompletedProcess:
         )
 
 
+class _GrokCompletedProcess:
+    returncode = 0
+
+    async def communicate(self, input=None):
+        assert input is None
+        return (
+            b'{"type":"thought","data":"thinking"}\n'
+            b'{"type":"text","data":"grok answer"}\n'
+            b'{"type":"end","sessionId":"00000000-0000-4000-8000-000000000001",'
+            b'"requestId":"00000000-0000-4000-8000-000000000002",'
+            b'"usage":{"input_tokens":10,"cache_read_input_tokens":20,'
+            b'"output_tokens":5,"reasoning_tokens":3,"total_tokens":35}}\n',
+            b"",
+        )
+
+
 def test_claude_structured_worker_uses_json_result_and_native_usage():
     process = _ClaudeCompletedProcess()
     with (
@@ -83,6 +99,38 @@ def test_claude_structured_worker_uses_json_result_and_native_usage():
     assert result.token_usage.total_tokens == 32
     assert spawn.await_args.args[:4] == ("claude", "-p", "--output-format", "json")
     assert spawn.await_args.args[-1] == "do it"
+    assert persist.call_args.kwargs["usage"].estimated is False
+
+
+def test_grok_structured_worker_uses_streaming_json_and_native_usage():
+    process = _GrokCompletedProcess()
+    with (
+        patch(
+            "cli_agent_orchestrator.services.structured_worker.GrokCliProvider.build_structured_command",
+            return_value=["grok", "--output-format", "streaming-json", "--single"],
+        ),
+        patch(
+            "cli_agent_orchestrator.services.structured_worker.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=process),
+        ) as spawn,
+        patch(
+            "cli_agent_orchestrator.services.structured_worker.persist_worker_token_usage"
+        ) as persist,
+    ):
+        result = asyncio.run(run_structured_worker_step("grok_cli", "developer", "do it"))
+
+    assert result.status == TerminalStatus.COMPLETED
+    assert result.last_message == "grok answer"
+    assert result.token_usage.estimated is False
+    assert result.token_usage.input_tokens == 30
+    assert result.token_usage.total_tokens == 35
+    assert spawn.await_args.args == (
+        "grok",
+        "--output-format",
+        "streaming-json",
+        "--single",
+        "do it",
+    )
     assert persist.call_args.kwargs["usage"].estimated is False
 
 
