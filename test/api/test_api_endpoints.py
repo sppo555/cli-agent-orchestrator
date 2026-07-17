@@ -1175,6 +1175,10 @@ class TestLifespan:
         with (
             patch("cli_agent_orchestrator.api.main.setup_logging"),
             patch("cli_agent_orchestrator.api.main.init_db"),
+            patch(
+                "cli_agent_orchestrator.services.memory_reconciliation.reconcile_memory_startup",
+                return_value=None,
+            ),
             patch("cli_agent_orchestrator.api.main.cleanup_old_data"),
             patch("cli_agent_orchestrator.api.main.cleanup_expired_memories", quick_return),
             patch("cli_agent_orchestrator.api.main.flow_daemon", fake_daemon),
@@ -1242,6 +1246,10 @@ class TestLifespan:
         with (
             patch("cli_agent_orchestrator.api.main.setup_logging"),
             patch("cli_agent_orchestrator.api.main.init_db"),
+            patch(
+                "cli_agent_orchestrator.services.memory_reconciliation.reconcile_memory_startup",
+                return_value=None,
+            ),
             patch("cli_agent_orchestrator.api.main.cleanup_old_data"),
             patch("cli_agent_orchestrator.api.main.cleanup_expired_memories", quick_return),
             patch("cli_agent_orchestrator.api.main.flow_daemon", fake_daemon),
