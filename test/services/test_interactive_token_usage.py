@@ -446,6 +446,7 @@ def test_missing_provider_usage_omits_record_instead_of_inventing_estimate(tmp_p
         agent="developer",
         session_name="session",
         window_name="window",
+        prompt="task",
         progress=None,
         source_path=log,
         marker=None,
@@ -456,3 +457,37 @@ def test_missing_provider_usage_omits_record_instead_of_inventing_estimate(tmp_p
     ):
         assert interactive.complete_interactive_usage_turn(turn) is None
     persist.assert_not_called()
+
+
+def test_agy_missing_native_usage_persists_one_estimated_fallback():
+    marker = interactive._AgyMarker(
+        workspace="/tmp/agy-workspace",
+        snapshot_ns=1,
+        source_indexes=(),
+    )
+    turn = interactive.InteractiveUsageTurn(
+        terminal_id="agy-fallback",
+        provider="antigravity_cli",
+        agent="developer_agy",
+        session_name="session",
+        window_name="window",
+        prompt="explain the change",
+        progress=None,
+        source_path=None,
+        marker=marker,
+    )
+    with (
+        patch.object(interactive, "_usage_for_turn", return_value=None),
+        patch.object(interactive, "_CAPTURE_RETRY_DELAYS", (0.0,)),
+        patch(
+            "cli_agent_orchestrator.services.terminal_service.get_output",
+            return_value="implemented safely",
+        ),
+        patch.object(interactive, "persist_worker_token_usage") as persist,
+    ):
+        usage = interactive.complete_interactive_usage_turn(turn)
+
+    assert usage is not None
+    assert usage.estimated is True
+    persist.assert_called_once()
+    assert persist.call_args.kwargs["usage"] is usage

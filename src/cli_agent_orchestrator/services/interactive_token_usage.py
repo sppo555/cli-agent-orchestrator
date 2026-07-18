@@ -25,6 +25,7 @@ from typing import Any, Optional
 from cli_agent_orchestrator.models.provider import ProviderType
 from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.services.token_usage import (
+    estimate_token_usage,
     persist_worker_token_usage,
     resolve_worker_configuration,
     resolve_worker_progress,
@@ -67,6 +68,7 @@ class InteractiveUsageTurn:
     agent: str
     session_name: str
     window_name: str
+    prompt: str
     progress: Optional[str]
     source_path: Optional[Path]
     marker: Any
@@ -536,6 +538,7 @@ def begin_interactive_usage_turn(
                 agent=agent,
                 session_name=session_name,
                 window_name=window_name,
+                prompt=prompt,
                 progress=progress,
                 source_path=None,
                 marker=0,
@@ -564,6 +567,7 @@ def begin_interactive_usage_turn(
             agent=agent,
             session_name=session_name,
             window_name=window_name,
+            prompt=prompt,
             progress=progress,
             source_path=source_path,
             marker=marker,
@@ -677,6 +681,24 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     )
 
 
+def _agy_estimated_fallback(turn: InteractiveUsageTurn) -> TokenUsage:
+    """Estimate one Agy turn after provider-owned native evidence is exhausted."""
+
+    from cli_agent_orchestrator.services import terminal_service
+    from cli_agent_orchestrator.services.terminal_service import OutputMode
+
+    last_message = terminal_service.get_output(turn.terminal_id, OutputMode.LAST)
+    model, effort = resolve_worker_configuration(turn.provider, turn.agent)
+    progress = resolve_worker_progress(turn.progress, turn.prompt, last_message)
+    return estimate_token_usage(
+        turn.prompt,
+        last_message,
+        model=model,
+        effort=effort,
+        progress=progress,
+    )
+
+
 def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     """Read and persist one claimed native turn; never fail terminal status."""
 
@@ -688,6 +710,8 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
             usage = _usage_for_turn(turn)
             if usage is not None:
                 break
+        if usage is None and turn.provider == ProviderType.ANTIGRAVITY_CLI.value:
+            usage = _agy_estimated_fallback(turn)
         if usage is None:
             _finish_interactive_usage_claim(turn, consumed=False)
             logger.warning(
