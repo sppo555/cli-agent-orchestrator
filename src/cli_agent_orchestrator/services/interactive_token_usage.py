@@ -33,11 +33,6 @@ from cli_agent_orchestrator.services.token_usage import (
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_INTERACTIVE_PROVIDERS = {
-    ProviderType.CLAUDE_CODE.value,
-    ProviderType.CODEX.value,
-    ProviderType.ANTIGRAVITY_CLI.value,
-}
 _CAPTURE_RETRY_DELAYS = (0.0, 0.2, 0.5)
 
 
@@ -522,7 +517,11 @@ def begin_interactive_usage_turn(
     turn instead of resetting the baseline and losing usage.
     """
 
-    if provider not in _NATIVE_INTERACTIVE_PROVIDERS:
+    try:
+        provider_type = ProviderType(provider)
+    except ValueError:
+        return False
+    if provider_type is ProviderType.MOCK_CLI:
         return False
     with _lock:
         if terminal_id in _active_turns:
@@ -557,9 +556,11 @@ def begin_interactive_usage_turn(
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
         else:
             source_path = None
-            marker = _agy_turn_marker(session_name, window_name)
-            if marker is None:
-                return False
+            marker = (
+                _agy_turn_marker(session_name, window_name)
+                if provider_type is ProviderType.ANTIGRAVITY_CLI
+                else None
+            )
 
         _active_turns[terminal_id] = InteractiveUsageTurn(
             terminal_id=terminal_id,
@@ -681,8 +682,8 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     )
 
 
-def _agy_estimated_fallback(turn: InteractiveUsageTurn) -> TokenUsage:
-    """Estimate one Agy turn after provider-owned native evidence is exhausted."""
+def _estimated_fallback(turn: InteractiveUsageTurn) -> TokenUsage:
+    """Estimate one terminal turn after provider-owned native evidence is exhausted."""
 
     from cli_agent_orchestrator.services import terminal_service
     from cli_agent_orchestrator.services.terminal_service import OutputMode
@@ -710,8 +711,8 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
             usage = _usage_for_turn(turn)
             if usage is not None:
                 break
-        if usage is None and turn.provider == ProviderType.ANTIGRAVITY_CLI.value:
-            usage = _agy_estimated_fallback(turn)
+        if usage is None:
+            usage = _estimated_fallback(turn)
         if usage is None:
             _finish_interactive_usage_claim(turn, consumed=False)
             logger.warning(
