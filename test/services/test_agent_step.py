@@ -65,13 +65,16 @@ def _patch_terminal_layer(
 
 class TestHappyPath:
     def test_interactive_path_remains_estimate_only(self):
-        create, send, delete, get_output, exit_cli, wait, status = _patch_terminal_layer()
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = (
+            _patch_terminal_layer()
+        )
         with (
             create,
             send,
             delete,
             get_output as m_out,
             exit_cli,
+            get_wd,
             wait,
             status,
             patch(f"{_MODULE}.persist_worker_token_usage") as persist,
