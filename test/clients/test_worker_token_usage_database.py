@@ -8,6 +8,7 @@ from cli_agent_orchestrator.clients.database import (
     list_worker_token_usage_page,
     summarize_worker_token_usage,
 )
+from cli_agent_orchestrator.models.provider import ProviderType
 
 
 def _seed(db_file, rows):
@@ -73,6 +74,17 @@ def test_page_and_summary_use_sql_aggregates(monkeypatch, tmp_path):
     assert summary["total_tokens"] == 23
     assert summary["by_model"][0]["value"] == "gpt-5"
     assert summary["by_model"][1]["value"] is None
+    providers = {bucket["value"]: bucket for bucket in summary["by_provider"]}
+    assert providers["codex"]["attempts"] == 2
+    assert providers["codex"]["total_tokens"] == 23
+    assert providers[ProviderType.ANTIGRAVITY_CLI.value] == {
+        "value": ProviderType.ANTIGRAVITY_CLI.value,
+        "attempts": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert ProviderType.MOCK_CLI.value not in providers
 
 
 def test_page_query_uses_recorded_keyset_index(monkeypatch, tmp_path):
