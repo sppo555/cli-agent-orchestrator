@@ -38,14 +38,19 @@ def test_filter_contract_normalizes_repeated_values_sentinel_and_time(monkeypatc
     assert filters.model == ("__default__",)
     assert filters.from_at == "2026-07-12T16:00:00+00:00"
     assert filters.to_at == "2026-07-13T01:00:00+00:00"
-    assert filters.fingerprint() == build_worker_token_usage_filters(
-        provider=["codex"], model=["__default__"], from_at=filters.from_at, to_at=filters.to_at
-    ).fingerprint()
+    assert (
+        filters.fingerprint()
+        == build_worker_token_usage_filters(
+            provider=["codex"], model=["__default__"], from_at=filters.from_at, to_at=filters.to_at
+        ).fingerprint()
+    )
 
     with pytest.raises(ValueError):
         build_worker_token_usage_filters(provider=["__default__"])
     with pytest.raises(ValueError):
-        build_worker_token_usage_filters(from_at="2026-07-14T00:00:00Z", to_at="2026-07-13T00:00:00Z")
+        build_worker_token_usage_filters(
+            from_at="2026-07-14T00:00:00Z", to_at="2026-07-13T00:00:00Z"
+        )
 
 
 def test_page_and_summary_use_sql_aggregates(monkeypatch, tmp_path):
@@ -55,8 +60,38 @@ def test_page_and_summary_use_sql_aggregates(monkeypatch, tmp_path):
     _seed(
         db_file,
         [
-            ("old", "t", "codex", "planner", None, None, None, None, None, 2, 3, 5, 1, "2026-07-12T23:00:00+00:00"),
-            ("new", "t", "codex", "planner", None, None, "gpt-5", "high", None, 7, 11, 18, 1, "2026-07-13T01:00:00+00:00"),
+            (
+                "old",
+                "t",
+                "codex",
+                "planner",
+                None,
+                None,
+                None,
+                None,
+                None,
+                2,
+                3,
+                5,
+                0,
+                "2026-07-12T23:00:00+00:00",
+            ),
+            (
+                "new",
+                "t",
+                "codex",
+                "planner",
+                None,
+                None,
+                "gpt-5",
+                "high",
+                None,
+                7,
+                11,
+                18,
+                1,
+                "2026-07-13T01:00:00+00:00",
+            ),
         ],
     )
     filters = build_worker_token_usage_filters(provider=["codex"])
@@ -77,12 +112,20 @@ def test_page_and_summary_use_sql_aggregates(monkeypatch, tmp_path):
     providers = {bucket["value"]: bucket for bucket in summary["by_provider"]}
     assert providers["codex"]["attempts"] == 2
     assert providers["codex"]["total_tokens"] == 23
+    assert providers["codex"]["native_attempts"] == 1
+    assert providers["codex"]["estimated_attempts"] == 1
+    assert providers["codex"]["native_tokens"] == 5
+    assert providers["codex"]["estimated_tokens"] == 18
     assert providers[ProviderType.ANTIGRAVITY_CLI.value] == {
         "value": ProviderType.ANTIGRAVITY_CLI.value,
         "attempts": 0,
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
+        "native_attempts": 0,
+        "estimated_attempts": 0,
+        "native_tokens": 0,
+        "estimated_tokens": 0,
     }
     assert providers[ProviderType.GROK_CLI.value] == {
         "value": ProviderType.GROK_CLI.value,
@@ -101,7 +144,22 @@ def test_page_query_uses_recorded_keyset_index(monkeypatch, tmp_path):
     _seed(
         db_file,
         [
-            (str(index), "t", "codex", "agent", None, None, None, None, None, 1, 1, 2, 1, f"2026-07-13T00:{index % 60:02d}:00+00:00")
+            (
+                str(index),
+                "t",
+                "codex",
+                "agent",
+                None,
+                None,
+                None,
+                None,
+                None,
+                1,
+                1,
+                2,
+                1,
+                f"2026-07-13T00:{index % 60:02d}:00+00:00",
+            )
             for index in range(1001)
         ],
     )

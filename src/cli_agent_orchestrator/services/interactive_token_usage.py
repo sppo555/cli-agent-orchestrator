@@ -25,6 +25,7 @@ from typing import Any, Optional
 from cli_agent_orchestrator.models.provider import ProviderType
 from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.services.token_usage import (
+    estimate_token_usage,
     persist_worker_token_usage,
     resolve_worker_configuration,
     resolve_worker_progress,
@@ -32,11 +33,6 @@ from cli_agent_orchestrator.services.token_usage import (
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_INTERACTIVE_PROVIDERS = {
-    ProviderType.CLAUDE_CODE.value,
-    ProviderType.CODEX.value,
-    ProviderType.ANTIGRAVITY_CLI.value,
-}
 _CAPTURE_RETRY_DELAYS = (0.0, 0.2, 0.5)
 
 
@@ -67,6 +63,7 @@ class InteractiveUsageTurn:
     agent: str
     session_name: str
     window_name: str
+    prompt: str
     progress: Optional[str]
     source_path: Optional[Path]
     marker: Any
@@ -520,7 +517,11 @@ def begin_interactive_usage_turn(
     turn instead of resetting the baseline and losing usage.
     """
 
-    if provider not in _NATIVE_INTERACTIVE_PROVIDERS:
+    try:
+        provider_type = ProviderType(provider)
+    except ValueError:
+        return False
+    if provider_type is ProviderType.MOCK_CLI:
         return False
     with _lock:
         if terminal_id in _active_turns:
@@ -536,6 +537,7 @@ def begin_interactive_usage_turn(
                 agent=agent,
                 session_name=session_name,
                 window_name=window_name,
+                prompt=prompt,
                 progress=progress,
                 source_path=None,
                 marker=0,
@@ -554,9 +556,11 @@ def begin_interactive_usage_turn(
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
         else:
             source_path = None
-            marker = _agy_turn_marker(session_name, window_name)
-            if marker is None:
-                return False
+            marker = (
+                _agy_turn_marker(session_name, window_name)
+                if provider_type is ProviderType.ANTIGRAVITY_CLI
+                else None
+            )
 
         _active_turns[terminal_id] = InteractiveUsageTurn(
             terminal_id=terminal_id,
@@ -564,6 +568,7 @@ def begin_interactive_usage_turn(
             agent=agent,
             session_name=session_name,
             window_name=window_name,
+            prompt=prompt,
             progress=progress,
             source_path=source_path,
             marker=marker,
@@ -677,6 +682,24 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     )
 
 
+def _estimated_fallback(turn: InteractiveUsageTurn) -> TokenUsage:
+    """Estimate one terminal turn after provider-owned native evidence is exhausted."""
+
+    from cli_agent_orchestrator.services import terminal_service
+    from cli_agent_orchestrator.services.terminal_service import OutputMode
+
+    last_message = terminal_service.get_output(turn.terminal_id, OutputMode.LAST)
+    model, effort = resolve_worker_configuration(turn.provider, turn.agent)
+    progress = resolve_worker_progress(turn.progress, turn.prompt, last_message)
+    return estimate_token_usage(
+        turn.prompt,
+        last_message,
+        model=model,
+        effort=effort,
+        progress=progress,
+    )
+
+
 def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     """Read and persist one claimed native turn; never fail terminal status."""
 
@@ -688,6 +711,8 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
             usage = _usage_for_turn(turn)
             if usage is not None:
                 break
+        if usage is None:
+            usage = _estimated_fallback(turn)
         if usage is None:
             _finish_interactive_usage_claim(turn, consumed=False)
             logger.warning(

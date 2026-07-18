@@ -227,9 +227,9 @@ def test_agy_malformed_metadata_is_ignored_without_reading_payload(tmp_path):
     assert interactive._agy_totals_after(database, 0) is None
 
 
-def test_agy_missing_source_falls_back_instead_of_claiming_native_turn():
+def test_agy_missing_source_starts_estimated_fallback_turn():
     with patch.object(interactive, "_agy_turn_marker", return_value=None):
-        assert not interactive.begin_interactive_usage_turn(
+        assert interactive.begin_interactive_usage_turn(
             terminal_id="agy-missing",
             provider="antigravity_cli",
             agent="developer_agy",
@@ -238,6 +238,7 @@ def test_agy_missing_source_falls_back_instead_of_claiming_native_turn():
             prompt="task",
         )
     assert interactive.claim_completed_interactive_usage_turn("agy-missing") is None
+    interactive.clear_interactive_usage_terminal("agy-missing")
 
 
 def test_agy_conversation_is_correlated_by_terminal_specific_working_directory(tmp_path):
@@ -335,8 +336,8 @@ def test_second_input_while_busy_does_not_reset_native_baseline(tmp_path):
     interactive.clear_interactive_usage_terminal("codex-busy")
 
 
-def test_unknown_provider_is_not_claimed():
-    assert not interactive.begin_interactive_usage_turn(
+def test_estimate_only_provider_is_tracked_after_processing():
+    assert interactive.begin_interactive_usage_turn(
         terminal_id="kiro-1",
         provider="kiro_cli",
         agent="developer",
@@ -345,6 +346,32 @@ def test_unknown_provider_is_not_claimed():
         prompt="task",
     )
     assert interactive.claim_completed_interactive_usage_turn("kiro-1") is None
+    assert interactive.observe_interactive_usage_processing("kiro-1")
+    turn = interactive.claim_completed_interactive_usage_turn("kiro-1")
+    assert turn is not None
+    with (
+        patch(
+            "cli_agent_orchestrator.services.terminal_service.get_output",
+            return_value="done",
+        ),
+        patch.object(interactive, "persist_worker_token_usage") as persist,
+    ):
+        usage = interactive.complete_interactive_usage_turn(turn)
+    assert usage is not None
+    assert usage.estimated is True
+    persist.assert_called_once()
+
+
+def test_unknown_and_mock_providers_are_not_tracked():
+    for provider in ("unknown", "mock_cli"):
+        assert not interactive.begin_interactive_usage_turn(
+            terminal_id=f"terminal-{provider}",
+            provider=provider,
+            agent="developer",
+            session_name="session",
+            window_name="window",
+            prompt="task",
+        )
 
 
 def test_stale_ready_edge_cannot_claim_before_new_processing(tmp_path):
@@ -446,6 +473,7 @@ def test_missing_provider_usage_omits_record_instead_of_inventing_estimate(tmp_p
         agent="developer",
         session_name="session",
         window_name="window",
+        prompt="task",
         progress=None,
         source_path=log,
         marker=None,
@@ -456,3 +484,37 @@ def test_missing_provider_usage_omits_record_instead_of_inventing_estimate(tmp_p
     ):
         assert interactive.complete_interactive_usage_turn(turn) is None
     persist.assert_not_called()
+
+
+def test_agy_missing_native_usage_persists_one_estimated_fallback():
+    marker = interactive._AgyMarker(
+        workspace="/tmp/agy-workspace",
+        snapshot_ns=1,
+        source_indexes=(),
+    )
+    turn = interactive.InteractiveUsageTurn(
+        terminal_id="agy-fallback",
+        provider="antigravity_cli",
+        agent="developer_agy",
+        session_name="session",
+        window_name="window",
+        prompt="explain the change",
+        progress=None,
+        source_path=None,
+        marker=marker,
+    )
+    with (
+        patch.object(interactive, "_usage_for_turn", return_value=None),
+        patch.object(interactive, "_CAPTURE_RETRY_DELAYS", (0.0,)),
+        patch(
+            "cli_agent_orchestrator.services.terminal_service.get_output",
+            return_value="implemented safely",
+        ),
+        patch.object(interactive, "persist_worker_token_usage") as persist,
+    ):
+        usage = interactive.complete_interactive_usage_turn(turn)
+
+    assert usage is not None
+    assert usage.estimated is True
+    persist.assert_called_once()
+    assert persist.call_args.kwargs["usage"] is usage

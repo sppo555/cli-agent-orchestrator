@@ -1689,6 +1689,13 @@ class TokenUsageBucket(BaseModel):
     total_tokens: int
 
 
+class ProviderTokenUsageBucket(TokenUsageBucket):
+    native_attempts: int
+    estimated_attempts: int
+    native_tokens: int
+    estimated_tokens: int
+
+
 class WorkerTokenUsagePage(BaseModel):
     records: List[WorkerTokenUsageRecord]
     next_cursor: Optional[str] = None
@@ -1702,7 +1709,7 @@ class WorkerTokenUsageSummary(BaseModel):
     output_tokens: int
     total_tokens: int
     daily: List[TokenUsageBucket]
-    by_provider: List[TokenUsageBucket]
+    by_provider: List[ProviderTokenUsageBucket]
     by_agent: List[TokenUsageBucket]
     by_model: List[TokenUsageBucket]
     by_effort: List[TokenUsageBucket]
