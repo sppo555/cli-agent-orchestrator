@@ -53,9 +53,54 @@ def test_token_usage_page_keyset_and_summary_share_filters(client, tmp_path, mon
     _seed_usage(
         db_file,
         [
-            ("a", "term-a", "codex", "planner", "run-1", "step-a", None, None, None, 10, 5, 15, 1, "2026-07-13T01:00:00+00:00"),
-            ("b", "term-b", "codex", "reviewer", "run-1", "step-b", "gpt-5", "high", None, 20, 10, 30, 1, "2026-07-13T02:00:00+00:00"),
-            ("c", "term-c", "claude_code", "reviewer", "run-1", "step-c", "opus", "high", None, 30, 15, 45, 0, "2026-07-13T03:00:00+00:00"),
+            (
+                "a",
+                "term-a",
+                "codex",
+                "planner",
+                "run-1",
+                "step-a",
+                None,
+                None,
+                None,
+                10,
+                5,
+                15,
+                1,
+                "2026-07-13T01:00:00+00:00",
+            ),
+            (
+                "b",
+                "term-b",
+                "codex",
+                "reviewer",
+                "run-1",
+                "step-b",
+                "gpt-5",
+                "high",
+                None,
+                20,
+                10,
+                30,
+                1,
+                "2026-07-13T02:00:00+00:00",
+            ),
+            (
+                "c",
+                "term-c",
+                "claude_code",
+                "reviewer",
+                "run-1",
+                "step-c",
+                "opus",
+                "high",
+                None,
+                30,
+                15,
+                45,
+                0,
+                "2026-07-13T03:00:00+00:00",
+            ),
         ],
     )
 
@@ -79,9 +124,22 @@ def test_token_usage_page_keyset_and_summary_share_filters(client, tmp_path, mon
     summary_body = summary.json()
     assert summary_body["attempts"] == 2
     assert summary_body["total_tokens"] == 45
+    codex_coverage = next(
+        bucket for bucket in summary_body["by_provider"] if bucket["value"] == "codex"
+    )
+    assert codex_coverage["native_attempts"] == 0
+    assert codex_coverage["estimated_attempts"] == 2
+    assert codex_coverage["native_tokens"] == 0
+    assert codex_coverage["estimated_tokens"] == 45
     assert {group["value"] for group in summary_body["by_agent"]} == {"planner", "reviewer"}
     assert summary_body["by_model"] == [
-        {"value": "gpt-5", "attempts": 1, "input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
+        {
+            "value": "gpt-5",
+            "attempts": 1,
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "total_tokens": 30,
+        },
         {"value": None, "attempts": 1, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
     ]
 
@@ -93,11 +151,31 @@ def test_token_usage_page_same_timestamp_has_no_duplicates(client, tmp_path, mon
     timestamp = "2026-07-13T04:00:00+00:00"
     _seed_usage(
         db_file,
-        [(record_id, "term", "codex", "agent", None, None, None, None, None, 1, 1, 2, 1, timestamp) for record_id in ("a", "b", "c")],
+        [
+            (
+                record_id,
+                "term",
+                "codex",
+                "agent",
+                None,
+                None,
+                None,
+                None,
+                None,
+                1,
+                1,
+                2,
+                1,
+                timestamp,
+            )
+            for record_id in ("a", "b", "c")
+        ],
     )
 
     first = client.get("/token-usage/page", params={"limit": 2})
-    second = client.get("/token-usage/page", params={"limit": 2, "cursor": first.json()["next_cursor"]})
+    second = client.get(
+        "/token-usage/page", params={"limit": 2, "cursor": first.json()["next_cursor"]}
+    )
     assert first.status_code == second.status_code == 200
     assert [row["id"] for row in first.json()["records"]] == ["c", "b"]
     assert [row["id"] for row in second.json()["records"]] == ["a"]

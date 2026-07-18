@@ -850,13 +850,24 @@ def _worker_token_usage_aggregate(
     where: str,
     values: Sequence[Any],
     group_by: Optional[str] = None,
+    include_provenance: bool = False,
 ) -> List[Dict[str, Any]]:
     group_clause = f" GROUP BY {group_by} ORDER BY SUM(total_tokens) DESC" if group_by else ""
+    provenance_columns = (
+        ", SUM(CASE WHEN estimated = 0 THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN estimated = 1 THEN 1 ELSE 0 END), "
+        "COALESCE(SUM(CASE WHEN estimated = 0 THEN total_tokens ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN estimated = 1 THEN total_tokens ELSE 0 END), 0)"
+        if include_provenance
+        else ""
+    )
     rows = conn.execute(
         "SELECT "
         + (f"{group_by}, " if group_by else "")
         + "COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), "
-        + "COALESCE(SUM(total_tokens), 0) FROM worker_token_usage"
+        + "COALESCE(SUM(total_tokens), 0)"
+        + provenance_columns
+        + " FROM worker_token_usage"
         + where
         + group_clause,
         tuple(values),
@@ -869,6 +880,16 @@ def _worker_token_usage_aggregate(
                 "input_tokens": row[2],
                 "output_tokens": row[3],
                 "total_tokens": row[4],
+                **(
+                    {
+                        "native_attempts": row[5],
+                        "estimated_attempts": row[6],
+                        "native_tokens": row[7],
+                        "estimated_tokens": row[8],
+                    }
+                    if include_provenance
+                    else {}
+                ),
             }
             for row in rows
         ]
@@ -904,7 +925,13 @@ def summarize_worker_token_usage(
             tuple(values),
         ).fetchall()
         grouped = {
-            field: _worker_token_usage_aggregate(conn, where=where, values=values, group_by=field)
+            field: _worker_token_usage_aggregate(
+                conn,
+                where=where,
+                values=values,
+                group_by=field,
+                include_provenance=field == "provider",
+            )
             for field in ("provider", "agent", "model", "effort")
         }
     # Provider facets are an inventory, not merely a projection of rows that
@@ -923,6 +950,10 @@ def summarize_worker_token_usage(
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "native_attempts": 0,
+            "estimated_attempts": 0,
+            "native_tokens": 0,
+            "estimated_tokens": 0,
         }
         for provider in ProviderType
         if provider is not ProviderType.MOCK_CLI and provider.value not in observed_providers

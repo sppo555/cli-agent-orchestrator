@@ -23,6 +23,13 @@ export interface TokenUsageBucket {
   total_tokens: number
 }
 
+export interface ProviderTokenUsageBucket extends TokenUsageBucket {
+  native_attempts: number
+  estimated_attempts: number
+  native_tokens: number
+  estimated_tokens: number
+}
+
 export interface WorkerTokenUsagePage {
   records: WorkerTokenUsageRecord[]
   next_cursor: string | null
@@ -36,7 +43,7 @@ export interface WorkerTokenUsageSummary {
   output_tokens: number
   total_tokens: number
   daily: TokenUsageBucket[]
-  by_provider: TokenUsageBucket[]
+  by_provider: ProviderTokenUsageBucket[]
   by_agent: TokenUsageBucket[]
   by_model: TokenUsageBucket[]
   by_effort: TokenUsageBucket[]
