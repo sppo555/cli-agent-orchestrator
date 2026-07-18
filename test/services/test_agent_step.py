@@ -85,6 +85,27 @@ class TestHappyPath:
         assert persist.call_args.kwargs["usage"].estimated is True
         m_out.assert_called_once_with("abc12345", OutputMode.LAST)
 
+    def test_grok_assign_handoff_path_remains_estimated(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer(
+            output="grok interactive answer"
+        )
+        with (
+            create,
+            send as m_send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage.estimated is True
+        assert persist.call_args.kwargs["usage"].estimated is True
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
+
     def test_create_per_call_runs_full_sequence_and_tears_down(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
         with (
