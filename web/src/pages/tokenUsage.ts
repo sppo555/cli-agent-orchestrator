@@ -49,6 +49,8 @@ export function labelFor(value: string | null | undefined): string {
 }
 
 export function displayProvider(value: string): string {
+  if (value === 'antigravity_cli') return 'Agy'
+  if (value === 'grok_cli') return 'Grok'
   return value.replace(/_cli$/, '').replace(/_/g, ' ')
 }
 

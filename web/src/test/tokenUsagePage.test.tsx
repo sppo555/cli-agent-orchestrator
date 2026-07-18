@@ -24,7 +24,10 @@ const summary = (summaryRecords: WorkerTokenUsageRecord[] = records): WorkerToke
   output_tokens: summaryRecords.reduce((total, row) => total + row.output_tokens, 0),
   total_tokens: summaryRecords.reduce((total, row) => total + row.total_tokens, 0),
   daily: [{ value: '2026-07-13', attempts: summaryRecords.length, input_tokens: 1800, output_tokens: 1200, total_tokens: summaryRecords.reduce((total, row) => total + row.total_tokens, 0) }],
-  by_provider: [...new Set(summaryRecords.map(row => row.provider))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+  by_provider: [
+    ...[...new Set(summaryRecords.map(row => row.provider))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
+    { value: 'antigravity_cli', attempts: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  ],
   by_agent: [...new Set(summaryRecords.map(row => row.agent))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
   by_model: [...new Set(summaryRecords.map(row => row.model))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
   by_effort: [...new Set(summaryRecords.map(row => row.effort))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
@@ -57,6 +60,16 @@ describe('TokenUsagePage', () => {
       expect(screen.queryByText('…/worker-results/plan.md')).not.toBeInTheDocument()
       expect(screen.getByText('1 attempts')).toBeInTheDocument()
     })
+  })
+
+  it('keeps zero-usage providers visible with friendly labels and totals', async () => {
+    vi.spyOn(tokenApi, 'listTokenUsagePage').mockResolvedValue(page())
+    vi.spyOn(tokenApi, 'summarizeTokenUsage').mockResolvedValue(summary())
+    render(<TokenUsagePage />)
+
+    await waitFor(() => expect(screen.getByLabelText('Provider: antigravity_cli')).toBeInTheDocument())
+    expect(screen.getByText('Agy')).toBeInTheDocument()
+    expect(screen.getAllByText('0').length).toBeGreaterThan(0)
   })
 
   it('provides a link back to the dashboard', async () => {

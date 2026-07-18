@@ -1,8 +1,8 @@
 """Minimal database client with only terminal metadata."""
 
-import logging
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -904,11 +904,30 @@ def summarize_worker_token_usage(
             tuple(values),
         ).fetchall()
         grouped = {
-            field: _worker_token_usage_aggregate(
-                conn, where=where, values=values, group_by=field
-            )
+            field: _worker_token_usage_aggregate(conn, where=where, values=values, group_by=field)
             for field in ("provider", "agent", "model", "effort")
         }
+    # Provider facets are an inventory, not merely a projection of rows that
+    # happen to exist in the selected range.  Keeping zero-usage providers in
+    # the summary makes the dashboard honest about supported coverage and
+    # prevents filter choices from disappearing after another filter is
+    # selected.  mock_cli is test infrastructure rather than a user-facing
+    # provider, so it is intentionally omitted.
+    from cli_agent_orchestrator.models.provider import ProviderType
+
+    observed_providers = {bucket["value"] for bucket in grouped["provider"]}
+    grouped["provider"].extend(
+        {
+            "value": provider.value,
+            "attempts": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+        for provider in ProviderType
+        if provider is not ProviderType.MOCK_CLI and provider.value not in observed_providers
+    )
+    grouped["provider"].sort(key=lambda bucket: bucket["value"] or "")
     return {
         **totals,
         "daily": [

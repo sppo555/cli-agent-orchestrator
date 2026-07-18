@@ -10,11 +10,15 @@ function FilterGroup({
   values,
   selected,
   onToggle,
+  labels,
+  totals,
 }: {
   title: string
   values: string[]
   selected: string[]
   onToggle: (value: string) => void
+  labels?: (value: string) => string
+  totals?: Map<string, number>
 }) {
   const [open, setOpen] = useState(true)
   if (values.length === 0) return null
@@ -33,6 +37,7 @@ function FilterGroup({
         <div className="mt-2 space-y-1.5">
           {values.map(value => {
             const checked = selected.includes(value)
+            const label = labels?.(value) || labelFor(value)
             return (
               <label key={value} className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm text-gray-300 hover:bg-gray-800/70">
                 <input
@@ -40,12 +45,13 @@ function FilterGroup({
                   checked={checked}
                   onChange={() => onToggle(value)}
                   className="sr-only"
-                  aria-label={`${title}: ${labelFor(value)}`}
+                  aria-label={`${title}: ${value}`}
                 />
                 <span className={`flex h-4 w-4 items-center justify-center rounded border ${checked ? 'border-emerald-400 bg-emerald-500 text-white' : 'border-gray-600 bg-gray-900'}`}>
                   {checked && <Check size={11} strokeWidth={3} />}
                 </span>
-                <span className="truncate" title={labelFor(value)}>{labelFor(value)}</span>
+                <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+                {totals && <span className="text-[10px] tabular-nums text-gray-600">{formatTokens(totals.get(value) || 0)}</span>}
               </label>
             )
           })}
@@ -171,6 +177,10 @@ export function TokenUsagePage() {
     model: summary?.by_model.map(bucket => bucket.value || '').sort((a, b) => labelFor(a).localeCompare(labelFor(b))) || [],
     effort: summary?.by_effort.map(bucket => bucket.value || '').sort((a, b) => labelFor(a).localeCompare(labelFor(b))) || [],
   }), [summary])
+  const providerTotals = useMemo(
+    () => new Map((summary?.by_provider || []).flatMap(bucket => bucket.value === null ? [] : [[bucket.value, bucket.total_tokens] as const])),
+    [summary],
+  )
 
   const filteredRecords = useMemo(() => {
     return filterAndSortRecords(records, filters, 'all', query, sort)
@@ -296,7 +306,7 @@ export function TokenUsagePage() {
             {activeFilterCount > 0 && <button type="button" onClick={clearFilters} className="text-xs text-emerald-400 hover:text-emerald-300">Clear ({activeFilterCount})</button>}
           </div>
           <div className="space-y-4">
-            <FilterGroup title="Provider" values={options.provider} selected={filters.provider} onToggle={value => toggleFilter('provider', value)} />
+            <FilterGroup title="Provider" values={options.provider} selected={filters.provider} onToggle={value => toggleFilter('provider', value)} labels={displayProvider} totals={providerTotals} />
             <FilterGroup title="Worker / agent" values={options.agent} selected={filters.agent} onToggle={value => toggleFilter('agent', value)} />
             <FilterGroup title="Model" values={options.model} selected={filters.model} onToggle={value => toggleFilter('model', value)} />
             <FilterGroup title="Effort" values={options.effort} selected={filters.effort} onToggle={value => toggleFilter('effort', value)} />
