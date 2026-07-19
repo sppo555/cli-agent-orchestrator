@@ -1,6 +1,9 @@
 """Regression tests for the temporary tmux render viewer."""
 
+import asyncio
 from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 from cli_agent_orchestrator.services import terminal_service
 from cli_agent_orchestrator.services.render_viewer import _RenderViewer, nudge_unattended_render
@@ -34,9 +37,7 @@ def test_unattended_nudge_shrinks_restores_and_always_stops_viewer():
         viewer.nudge_once.return_value = True
 
         assert (
-            nudge_unattended_render(
-                "cao-main", "reviewer", nudge_gap_seconds=0, settle_seconds=0
-            )
+            nudge_unattended_render("cao-main", "reviewer", nudge_gap_seconds=0, settle_seconds=0)
             is True
         )
 
@@ -94,3 +95,74 @@ def test_terminal_nudge_resolves_tmux_target_from_metadata():
         assert terminal_service.nudge_terminal_render("worker-1") is True
 
         nudge.assert_called_once_with("cao-main", "reviewer")
+
+
+@pytest.mark.asyncio
+async def test_deferred_init_uses_shared_headless_render_path():
+    """The non-blocking assign path must not bypass unattended rendering."""
+    provider = MagicMock()
+    provider.shell_baseline = None
+
+    with patch.object(
+        terminal_service,
+        "_initialize_provider_with_render",
+        new_callable=MagicMock,
+    ) as initialize:
+        initialize.return_value = asyncio.sleep(0)
+        terminal_service._schedule_deferred_init(provider, "worker-1", None, None, None)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    initialize.assert_called_once_with(provider)
+
+
+@pytest.mark.asyncio
+async def test_initialize_provider_with_render_wraps_tmux_and_cleans_up_on_success():
+    provider = MagicMock(session_name="cao-main", window_name="developer")
+    provider.initialize.return_value = asyncio.sleep(0)
+    viewer = MagicMock()
+
+    with (
+        patch.object(terminal_service, "get_backend") as get_backend,
+        patch.object(terminal_service, "render_during_init", return_value=viewer) as render,
+    ):
+        get_backend.return_value.supports_event_inbox.return_value = False
+        await terminal_service._initialize_provider_with_render(provider)
+
+    render.assert_called_once_with("cao-main", "developer")
+    viewer.__enter__.assert_called_once_with()
+    viewer.__exit__.assert_called_once_with(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_initialize_provider_with_render_cleans_up_tmux_on_failure():
+    provider = MagicMock(session_name="cao-main", window_name="developer")
+    provider.initialize.side_effect = RuntimeError("init failed")
+    viewer = MagicMock()
+
+    with (
+        patch.object(terminal_service, "get_backend") as get_backend,
+        patch.object(terminal_service, "render_during_init", return_value=viewer),
+        pytest.raises(RuntimeError, match="init failed"),
+    ):
+        get_backend.return_value.supports_event_inbox.return_value = False
+        await terminal_service._initialize_provider_with_render(provider)
+
+    viewer.__enter__.assert_called_once_with()
+    assert viewer.__exit__.call_count == 1
+    assert viewer.__exit__.call_args.args[0] is RuntimeError
+
+
+@pytest.mark.asyncio
+async def test_initialize_provider_with_render_skips_tmux_for_event_backend():
+    provider = MagicMock(session_name="herdr-session", window_name="developer")
+    provider.initialize.return_value = asyncio.sleep(0)
+
+    with (
+        patch.object(terminal_service, "get_backend") as get_backend,
+        patch.object(terminal_service, "render_during_init") as render,
+    ):
+        get_backend.return_value.supports_event_inbox.return_value = True
+        await terminal_service._initialize_provider_with_render(provider)
+
+    render.assert_not_called()

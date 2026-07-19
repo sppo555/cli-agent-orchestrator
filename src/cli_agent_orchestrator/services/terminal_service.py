@@ -172,6 +172,23 @@ RUNTIME_SKILL_PROMPT_PROVIDERS = {
     ProviderType.ANTIGRAVITY_CLI.value,
 }
 
+
+async def _initialize_provider_with_render(provider_instance) -> None:
+    """Initialize a provider while keeping unattended tmux TUIs rendering.
+
+    Both synchronous terminal creation and deferred ``assign`` initialization
+    must use this helper.  Keeping the policy in one place prevents a new init
+    path from bypassing the headless viewer and waiting forever for a Web
+    terminal to force the first idle repaint.
+    """
+    if get_backend().supports_event_inbox():
+        await provider_instance.initialize()
+        return
+
+    with render_during_init(provider_instance.session_name, provider_instance.window_name):
+        await provider_instance.initialize()
+
+
 # Providers whose tool restrictions are prompt-level text only (no native
 # blocking mechanism) — a restricted policy on these is advisory, not enforced.
 SOFT_ENFORCEMENT_PROVIDERS = {
@@ -418,11 +435,7 @@ async def create_terminal(
             # human opens the Web terminal. Hold a headless render-viewer on the
             # pane for the duration of init so the idle box flows to the buffer.
             # pipe-pane backends only; herdr delivers status via socket events.
-            if get_backend().supports_event_inbox():
-                await provider_instance.initialize()
-            else:
-                with render_during_init(session_name, window_name):
-                    await provider_instance.initialize()
+            await _initialize_provider_with_render(provider_instance)
 
             # Persist shell_command baseline if the provider captured one
             shell_command = provider_instance.shell_baseline
@@ -615,7 +628,7 @@ def _schedule_deferred_init(
     async def _run() -> None:
         caller_id: Optional[str] = None
         try:
-            await provider_instance.initialize()
+            await _initialize_provider_with_render(provider_instance)
             shell_command = provider_instance.shell_baseline
             if isinstance(shell_command, str) and shell_command:
                 update_terminal_shell_command(terminal_id, shell_command)
