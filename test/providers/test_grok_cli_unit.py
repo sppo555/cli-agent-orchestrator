@@ -17,6 +17,7 @@ from cli_agent_orchestrator.providers.grok_cli import (
     GrokCliProvider,
     _probe_grok_version,
 )
+from cli_agent_orchestrator.services.interactive_token_usage import grok_usage_session_id
 
 
 def make_provider(**kwargs) -> GrokCliProvider:
@@ -86,7 +87,8 @@ def test_basic_command_uses_resolved_binary():
         return_value="/opt/grok/bin/grok",
     ):
         command = make_provider()._build_grok_command()
-    assert command.startswith("/opt/grok/bin/grok --always-approve --rules ")
+    assert command.startswith("/opt/grok/bin/grok --always-approve --session-id ")
+    assert grok_usage_session_id("terminal1", "session1", "window1") in command
     assert "Acknowledge your role briefly" in command
     assert "Do not inspect, edit, execute" in command
     assert "--plugin-dir" not in command
@@ -106,6 +108,7 @@ def test_build_structured_command_uses_attempt_local_streaming_json_without_star
         command = make_provider().build_structured_command()
 
     assert command[0] == "/bin/grok"
+    assert grok_usage_session_id("terminal1", "session1", "window1") not in command
     assert command[-5:] == [
         "--output-format",
         "streaming-json",

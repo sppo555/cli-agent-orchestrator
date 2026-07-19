@@ -21,6 +21,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 from cli_agent_orchestrator.models.provider import ProviderType
 from cli_agent_orchestrator.models.token_usage import TokenUsage
@@ -55,6 +56,13 @@ class _AgyMarker:
 
 
 @dataclass(frozen=True)
+class _GrokMarker:
+    source_path: Path
+    session_id: str
+    baseline: Optional[_TokenTotals]
+
+
+@dataclass(frozen=True)
 class InteractiveUsageTurn:
     """A claimed interactive turn, safe to finish off the event loop."""
 
@@ -84,6 +92,13 @@ def claude_usage_session_id(terminal_id: str, session_name: str, window_name: st
     """
 
     key = f"cao-interactive:{session_name}:{window_name}:{terminal_id}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+
+def grok_usage_session_id(terminal_id: str, session_name: str, window_name: str) -> str:
+    """Return the stable UUID passed to an interactive Grok conversation."""
+
+    key = f"cao-grok-interactive:{session_name}:{window_name}:{terminal_id}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
 
 
@@ -187,19 +202,13 @@ def _discover_codex_rollout(session_name: str, window_name: str) -> Optional[Pat
 
 
 def _pane_working_directory(session_name: str, window_name: str) -> Optional[str]:
-    target = f"{session_name}:{window_name}"
     try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", target, "#{pane_current_path}"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        from cli_agent_orchestrator.backends.registry import get_backend
+
+        working_directory = get_backend().get_pane_working_directory(session_name, window_name)
+    except Exception:  # noqa: BLE001 - usage discovery must fail closed
         return None
-    working_directory = result.stdout.strip()
-    return working_directory or None
+    return working_directory.strip() if working_directory else None
 
 
 def _agy_isolated_workspace(session_name: str, window_name: str) -> Optional[str]:
@@ -501,6 +510,66 @@ def _codex_cumulative_totals(path: Path) -> Optional[_TokenTotals]:
     return found
 
 
+def _grok_source_path(
+    terminal_id: str, session_name: str, window_name: str
+) -> Optional[tuple[Path, str]]:
+    working_directory = _pane_working_directory(session_name, window_name)
+    if working_directory is None:
+        return None
+    session_id = grok_usage_session_id(terminal_id, session_name, window_name)
+    encoded_cwd = quote(working_directory, safe="")
+    path = Path.home() / ".grok" / "sessions" / encoded_cwd / session_id / "updates.jsonl"
+    return path, session_id
+
+
+def _grok_cumulative_totals(path: Path, session_id: str) -> Optional[_TokenTotals]:
+    """Return the latest valid provider-owned Grok turn-completed totals."""
+
+    found: Optional[_TokenTotals] = None
+    for event in _read_jsonl_from(path):
+        params = event.get("params")
+        if not isinstance(params, dict) or params.get("sessionId") != session_id:
+            continue
+        update = params.get("update")
+        if not isinstance(update, dict) or update.get("sessionUpdate") != "turn_completed":
+            continue
+        usage = update.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        input_tokens = _non_negative_int(usage.get("inputTokens"))
+        output_tokens = _non_negative_int(usage.get("outputTokens"))
+        total_tokens = _non_negative_int(usage.get("totalTokens"))
+        model_usage = usage.get("modelUsage")
+        if None in (input_tokens, output_tokens, total_tokens):
+            continue
+        if total_tokens != input_tokens + output_tokens:
+            continue
+        if not isinstance(model_usage, dict) or len(model_usage) != 1:
+            continue
+        model = next(iter(model_usage))
+        if not isinstance(model, str) or not model:
+            continue
+        found = _TokenTotals(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
+        )
+    return found
+
+
+def _grok_usage_delta(marker: _GrokMarker) -> Optional[_TokenTotals]:
+    current = _grok_cumulative_totals(marker.source_path, marker.session_id)
+    if current is None:
+        return None
+    baseline = marker.baseline or _TokenTotals(0, 0)
+    input_tokens = current.input_tokens - baseline.input_tokens
+    output_tokens = current.output_tokens - baseline.output_tokens
+    if input_tokens < 0 or output_tokens < 0:
+        return None
+    totals = _TokenTotals(input_tokens, output_tokens, model=current.model)
+    return totals if totals.total_tokens > 0 else None
+
+
 def begin_interactive_usage_turn(
     *,
     terminal_id: str,
@@ -554,6 +623,18 @@ def begin_interactive_usage_turn(
                 if source_path is not None:
                     _codex_sources[terminal_id] = source_path
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
+        elif provider == ProviderType.GROK_CLI.value:
+            source_path = None
+            source = _grok_source_path(terminal_id, session_name, window_name)
+            if source is None:
+                marker = None
+            else:
+                grok_path, session_id = source
+                marker = _GrokMarker(
+                    source_path=grok_path,
+                    session_id=session_id,
+                    baseline=_grok_cumulative_totals(grok_path, session_id),
+                )
         else:
             source_path = None
             marker = (
@@ -663,6 +744,10 @@ def _usage_for_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
         if input_tokens < 0 or output_tokens < 0:
             return None
         totals = _TokenTotals(input_tokens=input_tokens, output_tokens=output_tokens)
+    elif turn.provider == ProviderType.GROK_CLI.value:
+        if not isinstance(turn.marker, _GrokMarker):
+            return None
+        totals = _grok_usage_delta(turn.marker)
     else:
         if not isinstance(turn.marker, _AgyMarker):
             return None

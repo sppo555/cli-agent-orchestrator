@@ -20,6 +20,7 @@ from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import SECURITY_PROMPT
 from cli_agent_orchestrator.models.terminal import TerminalStatus
 from cli_agent_orchestrator.providers.base import BaseProvider, IncompleteOutputError
+from cli_agent_orchestrator.services.interactive_token_usage import grok_usage_session_id
 from cli_agent_orchestrator.services.settings_service import get_server_settings
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
 from cli_agent_orchestrator.utils.terminal import wait_for_shell, wait_until_status
@@ -134,7 +135,7 @@ class GrokCliProvider(BaseProvider):
                 f"Failed to load agent profile '{self._agent_profile}': {exc}"
             ) from exc
 
-    def _build_grok_command(self) -> str:
+    def _build_grok_command(self, *, interactive: bool = True) -> str:
         """Build a shell-escaped Grok TUI command without changing config."""
         binary = shutil.which("grok")
         if not binary:
@@ -142,6 +143,17 @@ class GrokCliProvider(BaseProvider):
 
         profile = self._load_profile()
         command = [binary, "--always-approve"]
+        if interactive:
+            command.extend(
+                [
+                    "--session-id",
+                    grok_usage_session_id(
+                        self.terminal_id,
+                        self.session_name,
+                        self.window_name,
+                    ),
+                ]
+            )
 
         profile_model = profile.model if profile is not None else None
         model = profile_model or self._model
@@ -197,7 +209,7 @@ class GrokCliProvider(BaseProvider):
     def build_structured_command(self) -> list[str]:
         """Build Grok's single-turn, process-local streaming JSON command."""
 
-        command = shlex.split(self._build_grok_command())
+        command = shlex.split(self._build_grok_command(interactive=False))
         rules_index = command.index("--rules") + 1
         rules = command[rules_index]
         guard_suffix = f"\n\n{STARTUP_GUARD}"

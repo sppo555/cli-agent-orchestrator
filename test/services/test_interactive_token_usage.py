@@ -47,6 +47,34 @@ def _codex_event(input_tokens: int, output_tokens: int):
     }
 
 
+def _grok_event(
+    session_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    model: str = "grok-4.5",
+    update_type: str = "turn_completed",
+):
+    return {
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": update_type,
+                "usage": {
+                    "inputTokens": input_tokens,
+                    "outputTokens": output_tokens,
+                    "totalTokens": input_tokens + output_tokens,
+                    "cachedReadTokens": max(0, input_tokens - 10),
+                    "reasoningTokens": 7,
+                    "modelCalls": 1,
+                    "modelUsage": {model: {}},
+                    "numTurns": 1,
+                },
+            },
+        }
+    }
+
+
 def _varint(value: int) -> bytes:
     encoded = bytearray()
     while value >= 0x80:
@@ -158,6 +186,107 @@ def test_codex_interactive_turn_persists_cumulative_delta(tmp_path):
     assert usage.model == "gpt-5"
     assert usage.effort == "xhigh"
     persist.assert_called_once()
+
+
+def test_grok_interactive_turn_persists_native_delta_without_cache_fold_in(tmp_path):
+    home = tmp_path / "home"
+    session_id = interactive.grok_usage_session_id("grok-1", "session", "window")
+    log = home / ".grok" / "sessions" / "%2Fworkspace" / session_id / "updates.jsonl"
+    log.parent.mkdir(parents=True)
+    _write(log, _grok_event(session_id, 100, 5))
+
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.object(interactive, "_pane_working_directory", return_value="/workspace"),
+    ):
+        assert interactive.begin_interactive_usage_turn(
+            terminal_id="grok-1",
+            provider="grok_cli",
+            agent="developer_grok",
+            session_name="session",
+            window_name="window",
+            prompt="do the task",
+        )
+        _write(log, _grok_event(session_id, 170, 14))
+        assert interactive.observe_interactive_usage_processing("grok-1")
+        turn = interactive.claim_completed_interactive_usage_turn("grok-1")
+        assert turn is not None
+        with patch.object(interactive, "persist_worker_token_usage") as persist:
+            usage = interactive.complete_interactive_usage_turn(turn)
+
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (70, 9, 79)
+    assert usage.estimated is False
+    assert usage.model == "grok-4.5"
+    persist.assert_called_once()
+
+
+def test_grok_parser_requires_matching_completed_event_and_unique_model(tmp_path):
+    log = tmp_path / "updates.jsonl"
+    expected = "session-1"
+    _write(
+        log,
+        _grok_event(expected, 10, 1, update_type="agent_message"),
+        _grok_event("other-session", 20, 2),
+        _grok_event(expected, 30, 3),
+    )
+    malformed = _grok_event(expected, 40, 4)
+    malformed["params"]["update"]["usage"]["modelUsage"] = {"a": {}, "b": {}}
+    _write(log, malformed)
+
+    totals = interactive._grok_cumulative_totals(log, expected)
+
+    assert totals == interactive._TokenTotals(30, 3, "grok-4.5")
+
+
+def test_grok_decreasing_counters_fall_back_to_one_estimate(tmp_path):
+    log = tmp_path / "updates.jsonl"
+    session_id = "session-1"
+    _write(log, _grok_event(session_id, 50, 5))
+    marker = interactive._GrokMarker(
+        source_path=log,
+        session_id=session_id,
+        baseline=interactive._TokenTotals(100, 10, "grok-4.5"),
+    )
+    turn = interactive.InteractiveUsageTurn(
+        terminal_id="grok-reset",
+        provider="grok_cli",
+        agent="developer_grok",
+        session_name="session",
+        window_name="window",
+        prompt="task",
+        progress=None,
+        source_path=None,
+        marker=marker,
+    )
+    with (
+        patch.object(interactive, "_CAPTURE_RETRY_DELAYS", (0.0,)),
+        patch(
+            "cli_agent_orchestrator.services.terminal_service.get_output",
+            return_value="done",
+        ),
+        patch.object(interactive, "persist_worker_token_usage") as persist,
+    ):
+        usage = interactive.complete_interactive_usage_turn(turn)
+
+    assert usage is not None
+    assert usage.estimated is True
+    persist.assert_called_once()
+
+
+def test_grok_same_cwd_terminals_resolve_distinct_session_paths(tmp_path):
+    home = tmp_path / "home"
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.object(interactive, "_pane_working_directory", return_value="/shared/repo"),
+    ):
+        first = interactive._grok_source_path("terminal-1", "session", "one")
+        second = interactive._grok_source_path("terminal-2", "session", "two")
+
+    assert first is not None and second is not None
+    assert first[0] != second[0]
+    assert first[1] != second[1]
+    assert "%2Fshared%2Frepo" in str(first[0])
 
 
 @pytest.mark.parametrize(
