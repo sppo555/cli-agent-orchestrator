@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.services.agent_step import StepExecutionError, run_agent_step
 from cli_agent_orchestrator.services.terminal_service import OutputMode
 
@@ -85,7 +86,7 @@ class TestHappyPath:
         assert persist.call_args.kwargs["usage"].estimated is True
         m_out.assert_called_once_with("abc12345", OutputMode.LAST)
 
-    def test_grok_assign_handoff_path_remains_estimated(self):
+    def test_grok_assign_handoff_falls_back_to_one_estimate_without_native_evidence(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer(
             output="grok interactive answer"
         )
@@ -105,6 +106,72 @@ class TestHappyPath:
         assert result.token_usage.estimated is True
         assert persist.call_args.kwargs["usage"].estimated is True
         m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
+
+    def test_grok_assign_handoff_persists_one_native_record_when_evidence_exists(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer(
+            output="grok interactive answer"
+        )
+        marker = object()
+        native = TokenUsage(
+            input_tokens=13000,
+            output_tokens=200,
+            total_tokens=13200,
+            estimated=False,
+            model="grok-4.5",
+        )
+        with (
+            create,
+            send as m_send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(
+                f"{_MODULE}.terminal_service.get_terminal",
+                return_value={"session_name": "cao-session", "name": "grok-window"},
+            ),
+            patch(f"{_MODULE}.begin_grok_usage_capture", return_value=marker) as begin,
+            patch(f"{_MODULE}.complete_grok_usage_capture", return_value=native) as complete,
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage is native
+        assert result.token_usage.estimated is False
+        begin.assert_called_once_with("abc12345", "cao-session", "grok-window")
+        complete.assert_called_once_with(marker, agent="developer_grok", progress=None)
+        persist.assert_called_once()
+        assert persist.call_args.kwargs["usage"] is native
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
+
+    def test_grok_native_reader_error_falls_back_to_one_estimate(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
+        with (
+            create,
+            send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(
+                f"{_MODULE}.terminal_service.get_terminal",
+                return_value={"session_name": "cao-session", "name": "grok-window"},
+            ),
+            patch(f"{_MODULE}.begin_grok_usage_capture", return_value=object()),
+            patch(
+                f"{_MODULE}.complete_grok_usage_capture",
+                side_effect=OSError("provider file disappeared"),
+            ),
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage.estimated is True
+        persist.assert_called_once()
 
     def test_create_per_call_runs_full_sequence_and_tears_down(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()

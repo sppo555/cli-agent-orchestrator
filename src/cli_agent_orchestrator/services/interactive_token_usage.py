@@ -570,6 +570,51 @@ def _grok_usage_delta(marker: _GrokMarker) -> Optional[_TokenTotals]:
     return totals if totals.total_tokens > 0 else None
 
 
+def begin_grok_usage_capture(
+    terminal_id: str, session_name: str, window_name: str
+) -> Optional[_GrokMarker]:
+    """Snapshot one exact Grok session before a run-step sends its prompt."""
+
+    source = _grok_source_path(terminal_id, session_name, window_name)
+    if source is None:
+        return None
+    source_path, session_id = source
+    return _GrokMarker(
+        source_path=source_path,
+        session_id=session_id,
+        baseline=_grok_cumulative_totals(source_path, session_id),
+    )
+
+
+def complete_grok_usage_capture(
+    marker: _GrokMarker,
+    *,
+    agent: str,
+    progress: Optional[str],
+) -> Optional[TokenUsage]:
+    """Return native Grok usage after provider flush retries, without persisting it."""
+
+    totals: Optional[_TokenTotals] = None
+    for delay in _CAPTURE_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        totals = _grok_usage_delta(marker)
+        if totals is not None:
+            break
+    if totals is None:
+        return None
+    configured_model, effort = resolve_worker_configuration(ProviderType.GROK_CLI.value, agent)
+    return TokenUsage(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        total_tokens=totals.total_tokens,
+        estimated=False,
+        model=totals.model or configured_model,
+        effort=effort,
+        progress=progress,
+    )
+
+
 def begin_interactive_usage_turn(
     *,
     terminal_id: str,
@@ -625,16 +670,7 @@ def begin_interactive_usage_turn(
             marker = _codex_cumulative_totals(source_path) if source_path is not None else None
         elif provider == ProviderType.GROK_CLI.value:
             source_path = None
-            source = _grok_source_path(terminal_id, session_name, window_name)
-            if source is None:
-                marker = None
-            else:
-                grok_path, session_id = source
-                marker = _GrokMarker(
-                    source_path=grok_path,
-                    session_id=session_id,
-                    baseline=_grok_cumulative_totals(grok_path, session_id),
-                )
+            marker = begin_grok_usage_capture(terminal_id, session_name, window_name)
         else:
             source_path = None
             marker = (
