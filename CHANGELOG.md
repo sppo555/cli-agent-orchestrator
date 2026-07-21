@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add a lifecycle-only Grok CLI provider with native deny rules, subagent
   restriction, raw/rendered status detection, response extraction, and Web/API
   registration; CAO MCP orchestration remains unsupported
+- `cao profile find <query>` CLI verb and `find_profiles` MCP tool for keyword/BM25 profile discovery over metadata (name, description, tags, capabilities); metadata-only, never exposes prompt bodies (#340)
+- Optional `capabilities` and `tags` arrays in the agent profile frontmatter schema (#340)
 
 ### Fixed
 
