@@ -6,7 +6,7 @@
   provider-owned session/rollout/conversation metadata. Claude and Codex
   structured adapters remain native; Agy structured/print output has no usage
   payload and retains estimated fallback.
-- Native/provider-reported coverage: 3/9 for assign/interactive; 2/9 for structured
+- Native/provider-reported coverage: 3/10 for assign/interactive; 2/10 for structured
 
 ## Evidence boundary
 
@@ -22,7 +22,7 @@ an arbitrary number in ordinary response text. A native adapter requires a
 sanitized fixture, provenance/version, field semantics, and a reviewed privacy
 boundary in 4.17.5.
 
-## Nine-provider inventory
+## Provider inventory
 
 (The `grok_cli` provider and its native structured token-usage adapter are owned
 by customization 4.18; see that branch's inventory row.)
@@ -38,6 +38,7 @@ by customization 4.18; see that branch's inventory row.)
 | `hermes` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `cursor_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `antigravity_cli` | Assign/interactive sessions on Agy 1.1.x launched in CAO's isolated Agy workspace | `gen_metadata` protobuf counters from conversation DBs whose trajectory metadata contains that terminal-specific workspace URI | Snapshot each matching DB's maximum generation index, then sum GenerationMetadata `input_tokens` and `output_tokens` rows created after the marker; total is their sum; inner Claude/Gemini model comes from the worker profile | Sanitized metadata-only protobuf fixtures for Claude Sonnet/Opus and Gemini Pro/Flash plus live Agy 1.1.2 evidence | Shared cwd, missing correlation, schema mismatch, malformed protobuf, SQLite failure, or zero delta returns `None` and retains estimated fallback | Read-only SQLite; inspect the workspace URI only for correlation and decode only wrapper/schema discriminators and input/output integers; never decode or persist prompt, response, steps, tools, artifacts, or source path |
+| `mock_cli` | No; test-only provider | No provider usage source | Synthetic output is never native evidence | Unit-test fixtures only | Retain estimate or omit tracking according to the test seam | Never included in the production provider filter or native-coverage denominator |
 
 ## Contract
 
