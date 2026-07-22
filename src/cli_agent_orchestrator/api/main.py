@@ -209,6 +209,22 @@ async def token_usage_spool_daemon() -> None:
         await asyncio.sleep(15)
 
 
+async def grok_usage_reconcile_daemon() -> None:
+    """Upgrade estimated Grok rows once their native usage flushes late."""
+
+    logger.info("Grok usage reconciliation daemon started")
+    while True:
+        try:
+            from cli_agent_orchestrator.services.grok_usage_reconciliation import (
+                reconcile_pending_grok_usage,
+            )
+
+            await asyncio.to_thread(reconcile_pending_grok_usage)
+        except Exception:
+            logger.exception("Grok usage reconciliation error")
+        await asyncio.sleep(60)
+
+
 # Response Models
 class TerminalOutputResponse(BaseModel):
     output: str
@@ -544,6 +560,7 @@ async def lifespan(app: FastAPI):
     await registry.load()
     app.state.plugin_registry = registry
     token_usage_spool_task = asyncio.create_task(token_usage_spool_daemon())
+    grok_usage_reconcile_task = asyncio.create_task(grok_usage_reconcile_daemon())
 
     # Run cleanup in background
     asyncio.create_task(asyncio.to_thread(cleanup_old_data))
@@ -640,6 +657,7 @@ async def lifespan(app: FastAPI):
     # Cancel daemon on shutdown
     daemon_task.cancel()
     token_usage_spool_task.cancel()
+    grok_usage_reconcile_task.cancel()
 
     try:
         await asyncio.gather(
@@ -648,6 +666,7 @@ async def lifespan(app: FastAPI):
             inbox_service_task,
             daemon_task,
             token_usage_spool_task,
+            grok_usage_reconcile_task,
             return_exceptions=True,
         )
     except asyncio.CancelledError:

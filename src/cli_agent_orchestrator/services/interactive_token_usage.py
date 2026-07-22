@@ -615,6 +615,43 @@ def complete_grok_usage_capture(
     )
 
 
+def grok_native_usage_from_marker(
+    *,
+    source_path: Path,
+    session_id: str,
+    baseline_input: int,
+    baseline_output: int,
+    agent: str,
+    progress: Optional[str],
+) -> Optional[TokenUsage]:
+    """Re-read a Grok session file for native usage over a stored baseline.
+
+    Used by out-of-band reconciliation to upgrade an estimated row once Grok
+    finally flushes its ``turn_completed`` usage record, which can land minutes
+    after the worker terminal was torn down. Returns ``None`` while no valid
+    completed turn beyond the baseline exists yet.
+    """
+
+    marker = _GrokMarker(
+        source_path=source_path,
+        session_id=session_id,
+        baseline=_TokenTotals(baseline_input, baseline_output),
+    )
+    totals = _grok_usage_delta(marker)
+    if totals is None:
+        return None
+    configured_model, effort = resolve_worker_configuration(ProviderType.GROK_CLI.value, agent)
+    return TokenUsage(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        total_tokens=totals.total_tokens,
+        estimated=False,
+        model=totals.model or configured_model,
+        effort=effort,
+        progress=progress,
+    )
+
+
 def begin_interactive_usage_turn(
     *,
     terminal_id: str,
@@ -821,6 +858,40 @@ def _estimated_fallback(turn: InteractiveUsageTurn) -> TokenUsage:
     )
 
 
+def _schedule_grok_reconcile(turn: InteractiveUsageTurn, record_id: str) -> None:
+    """Queue an estimated Grok turn for later native upgrade (best-effort).
+
+    Grok flushes its ``turn_completed`` usage record only when the turn truly
+    ends, which can be minutes after this estimate is persisted. The stored
+    marker already pins the exact session file and baseline, so reconciliation
+    can revisit it without reconstructing any path.
+    """
+
+    if turn.provider != ProviderType.GROK_CLI.value:
+        return
+    marker = turn.marker
+    if not isinstance(marker, _GrokMarker):
+        return
+    try:
+        from cli_agent_orchestrator.services.grok_usage_reconciliation import (
+            enqueue_grok_usage_reconcile,
+        )
+
+        baseline = marker.baseline or _TokenTotals(0, 0)
+        enqueue_grok_usage_reconcile(
+            record_id=record_id,
+            terminal_id=turn.terminal_id,
+            agent=turn.agent,
+            source_path=str(marker.source_path),
+            session_id=marker.session_id,
+            baseline_input=baseline.input_tokens,
+            baseline_output=baseline.output_tokens,
+            progress=turn.progress,
+        )
+    except Exception:  # noqa: BLE001 — reconciliation is best-effort
+        logger.debug("Failed to enqueue Grok usage reconciliation for %s", turn.terminal_id)
+
+
 def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[TokenUsage]:
     """Read and persist one claimed native turn; never fail terminal status."""
 
@@ -842,13 +913,15 @@ def complete_interactive_usage_turn(turn: InteractiveUsageTurn) -> Optional[Toke
                 turn.terminal_id,
             )
             return None
-        persist_worker_token_usage(
+        record_id = persist_worker_token_usage(
             terminal_id=turn.terminal_id,
             provider=turn.provider,
             agent=turn.agent,
             usage=usage,
             progress=turn.progress,
         )
+        if usage.estimated and record_id is not None:
+            _schedule_grok_reconcile(turn, record_id)
         _finish_interactive_usage_claim(turn, consumed=True)
         return usage
     except Exception:  # noqa: BLE001 - observability must never break worker completion

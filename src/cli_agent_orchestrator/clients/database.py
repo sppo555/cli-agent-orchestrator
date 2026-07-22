@@ -628,6 +628,34 @@ def record_worker_token_usage(
     return record_id
 
 
+def update_worker_token_usage_native(record_id: str, usage: Any) -> bool:
+    """Upgrade a previously estimated attempt to provider-native counts.
+
+    Only rows still flagged ``estimated`` are touched, so a row that was already
+    resolved natively (or removed) is never clobbered. Returns True when a row
+    was upgraded. Used by out-of-band Grok usage reconciliation.
+    """
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    with sqlite3.connect(str(DATABASE_FILE)) as conn:
+        cursor = conn.execute(
+            "UPDATE worker_token_usage SET input_tokens = ?, output_tokens = ?, "
+            "total_tokens = ?, model = ?, effort = ?, estimated = 0 "
+            "WHERE id = ? AND estimated = 1",
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.total_tokens,
+                usage.model,
+                usage.effort,
+                record_id,
+            ),
+        )
+        return cursor.rowcount > 0
+
+
 def list_worker_token_usage(
     *,
     terminal_id: Optional[str] = None,
