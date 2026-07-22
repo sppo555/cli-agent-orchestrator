@@ -19,8 +19,6 @@ import time
 from typing import Any, Dict
 from unittest.mock import patch
 
-from unittest.mock import patch
-
 import pytest
 
 # Make the `mock_cli` test-fixture binary discoverable for the pytest

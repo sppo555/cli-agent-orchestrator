@@ -23,7 +23,7 @@ an arbitrary number in ordinary response text. A native adapter requires a
 sanitized fixture, provenance/version, field semantics, and a reviewed privacy
 boundary in 4.17.5.
 
-## Ten-provider inventory
+## Provider inventory
 
 (The `grok_cli` provider and its native structured token-usage adapter are owned
 by customization 4.18.)
