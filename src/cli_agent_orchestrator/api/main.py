@@ -1,6 +1,8 @@
 """Single FastAPI entry point for all HTTP routes."""
 
 import asyncio
+import base64
+import binascii
 import fcntl
 import json
 import logging
@@ -81,6 +83,7 @@ from cli_agent_orchestrator.models.memory import (
     MemoryType,
 )
 from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
+from cli_agent_orchestrator.models.token_usage import WorkerTokenUsageRecord
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
@@ -116,7 +119,12 @@ from cli_agent_orchestrator.services.install_service import InstallResult, insta
 from cli_agent_orchestrator.services.log_writer import log_writer
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.step_output_store import _validate_key_part
+from cli_agent_orchestrator.services.structured_worker import (
+    StructuredWorkerError,
+    run_structured_worker_step,
+)
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
+from cli_agent_orchestrator.services.token_usage import TokenUsage
 from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
 from cli_agent_orchestrator.utils.logging import install_access_log_redaction, setup_logging
@@ -184,6 +192,22 @@ async def inbox_reconciliation_daemon(registry: PluginRegistry) -> None:
             logger.exception("Inbox reconciliation daemon error")
 
 
+async def token_usage_spool_daemon() -> None:
+    """Retry durable token-usage records while the server remains alive."""
+
+    logger.info("Token usage spool flusher started")
+    while True:
+        try:
+            from cli_agent_orchestrator.services.token_usage_spool import (
+                flush_token_usage_spool,
+            )
+
+            await asyncio.to_thread(flush_token_usage_spool)
+        except Exception:
+            logger.exception("Token usage spool flush error")
+        await asyncio.sleep(15)
+
+
 # Response Models
 class TerminalOutputResponse(BaseModel):
     output: str
@@ -210,6 +234,19 @@ class RunStepRequest(BaseModel):
     provider: str = Field(description="Provider type (e.g. 'kiro_cli', 'claude_code')")
     agent: str = Field(description="Agent profile name")
     prompt: str = Field(description="Prompt to send (caller applies any prompt shaping first)")
+    execution_mode: str = Field(
+        default="interactive",
+        pattern="^(interactive|structured)$",
+        description=(
+            "Execution contract. interactive keeps the existing tmux flow; "
+            "structured launches the provider's machine-readable worker command."
+        ),
+    )
+    progress: Optional[str] = Field(
+        default=None,
+        max_length=1024,
+        description="Optional artifact/progress identifier to persist with worker usage",
+    )
     session_name: Optional[str] = Field(
         default=None,
         description="Existing session to create the terminal in; auto-generated if None",
@@ -313,6 +350,14 @@ class RunStepRequest(BaseModel):
                 "env_vars cannot be injected into a reused terminal "
                 "(env injection only applies to freshly created terminals)"
             )
+        if self.execution_mode == "structured" and (
+            self.session_name is not None
+            or self.reuse_terminal_id is not None
+            or self.caller_id is not None
+        ):
+            raise ValueError(
+                "structured mode does not accept session_name, " "reuse_terminal_id, or caller_id"
+            )
         return self
 
 
@@ -322,6 +367,7 @@ class RunStepResponse(BaseModel):
     terminal_id: str
     last_message: str
     status: str
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)
 
 
 class WorkflowValidateRequest(BaseModel):
@@ -496,6 +542,7 @@ async def lifespan(app: FastAPI):
     registry = PluginRegistry()
     await registry.load()
     app.state.plugin_registry = registry
+    token_usage_spool_task = asyncio.create_task(token_usage_spool_daemon())
 
     # Run cleanup in background
     asyncio.create_task(asyncio.to_thread(cleanup_old_data))
@@ -591,6 +638,7 @@ async def lifespan(app: FastAPI):
             pass
     # Cancel daemon on shutdown
     daemon_task.cancel()
+    token_usage_spool_task.cancel()
 
     try:
         await asyncio.gather(
@@ -598,6 +646,7 @@ async def lifespan(app: FastAPI):
             log_writer_task,
             inbox_service_task,
             daemon_task,
+            token_usage_spool_task,
             return_exceptions=True,
         )
     except asyncio.CancelledError:
@@ -1914,6 +1963,263 @@ async def list_terminals_in_session(session_name: str) -> List[Dict]:
         )
 
 
+class TokenUsageBucket(BaseModel):
+    value: Optional[str] = None
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class ProviderTokenUsageBucket(TokenUsageBucket):
+    native_attempts: int
+    estimated_attempts: int
+    native_tokens: int
+    estimated_tokens: int
+
+
+class WorkerTokenUsagePage(BaseModel):
+    records: List[WorkerTokenUsageRecord]
+    next_cursor: Optional[str] = None
+    has_more: bool
+    snapshot_at: str
+
+
+class WorkerTokenUsageSummary(BaseModel):
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    daily: List[TokenUsageBucket]
+    by_provider: List[ProviderTokenUsageBucket]
+    by_agent: List[TokenUsageBucket]
+    by_model: List[TokenUsageBucket]
+    by_effort: List[TokenUsageBucket]
+    snapshot_at: str
+
+
+_TOKEN_USAGE_CURSOR_VERSION = 1
+
+
+def _token_usage_snapshot(value: Optional[str]) -> str:
+    from cli_agent_orchestrator.clients.database import normalize_worker_token_usage_timestamp
+
+    if value is None:
+        return datetime.now(timezone.utc).isoformat()
+    try:
+        normalized = normalize_worker_token_usage_timestamp(value, "snapshot_at")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    assert normalized is not None
+    return normalized
+
+
+def _encode_token_usage_cursor(
+    *, snapshot_at: str, recorded_at: str, record_id: str, fingerprint: str
+) -> str:
+    payload = {
+        "version": _TOKEN_USAGE_CURSOR_VERSION,
+        "snapshot_at": snapshot_at,
+        "recorded_at": recorded_at,
+        "id": record_id,
+        "fingerprint": fingerprint,
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_token_usage_cursor(cursor: str) -> Dict[str, str]:
+    from cli_agent_orchestrator.clients.database import normalize_worker_token_usage_timestamp
+
+    if not cursor or len(cursor) > 4096:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((cursor + padding).encode("ascii")))
+    except (binascii.Error, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        ) from exc
+    required = {"version", "snapshot_at", "recorded_at", "id", "fingerprint"}
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != required
+        or payload.get("version") != _TOKEN_USAGE_CURSOR_VERSION
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
+    if not all(isinstance(payload[key], str) and payload[key] for key in required - {"version"}):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        )
+    try:
+        snapshot_at = normalize_worker_token_usage_timestamp(payload["snapshot_at"], "snapshot_at")
+        recorded_at = normalize_worker_token_usage_timestamp(payload["recorded_at"], "recorded_at")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid cursor"
+        ) from exc
+    assert snapshot_at is not None and recorded_at is not None
+    return {
+        "snapshot_at": snapshot_at,
+        "recorded_at": recorded_at,
+        "id": payload["id"],
+        "fingerprint": payload["fingerprint"],
+    }
+
+
+def _token_usage_filters_or_422(**kwargs: Any) -> Any:
+    from cli_agent_orchestrator.clients.database import build_worker_token_usage_filters
+
+    try:
+        return build_worker_token_usage_filters(**kwargs)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
+@app.get("/token-usage/page", response_model=WorkerTokenUsagePage)
+async def page_token_usage(
+    provider: Optional[List[str]] = Query(default=None),
+    agent: Optional[List[str]] = Query(default=None),
+    model: Optional[List[str]] = Query(default=None),
+    effort: Optional[List[str]] = Query(default=None),
+    from_at: Optional[str] = Query(default=None, alias="from"),
+    to_at: Optional[str] = Query(default=None, alias="to"),
+    limit: int = Query(default=100, ge=1, le=500),
+    cursor: Optional[str] = Query(default=None),
+    snapshot_at: Optional[str] = Query(default=None),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> WorkerTokenUsagePage:
+    from cli_agent_orchestrator.clients.database import list_worker_token_usage_page
+
+    filters = _token_usage_filters_or_422(
+        provider=provider,
+        agent=agent,
+        model=model,
+        effort=effort,
+        from_at=from_at,
+        to_at=to_at,
+    )
+    boundary: Optional[Tuple[str, str]] = None
+    if cursor:
+        decoded = _decode_token_usage_cursor(cursor)
+        if decoded["fingerprint"] != filters.fingerprint():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="cursor does not match filters",
+            )
+        requested_snapshot = (
+            _token_usage_snapshot(snapshot_at) if snapshot_at else decoded["snapshot_at"]
+        )
+        if requested_snapshot != decoded["snapshot_at"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="cursor does not match snapshot",
+            )
+        snapshot = decoded["snapshot_at"]
+        boundary = (decoded["recorded_at"], decoded["id"])
+    else:
+        snapshot = _token_usage_snapshot(snapshot_at)
+    try:
+        rows, has_more = await asyncio.to_thread(
+            list_worker_token_usage_page,
+            filters,
+            snapshot_at=snapshot,
+            boundary=boundary,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to page token usage: {str(exc)}",
+        ) from exc
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = _encode_token_usage_cursor(
+            snapshot_at=snapshot,
+            recorded_at=last["recorded_at"],
+            record_id=last["id"],
+            fingerprint=filters.fingerprint(),
+        )
+    return WorkerTokenUsagePage(
+        records=[WorkerTokenUsageRecord.model_validate(row) for row in rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+        snapshot_at=snapshot,
+    )
+
+
+@app.get("/token-usage/summary", response_model=WorkerTokenUsageSummary)
+async def summary_token_usage(
+    provider: Optional[List[str]] = Query(default=None),
+    agent: Optional[List[str]] = Query(default=None),
+    model: Optional[List[str]] = Query(default=None),
+    effort: Optional[List[str]] = Query(default=None),
+    from_at: Optional[str] = Query(default=None, alias="from"),
+    to_at: Optional[str] = Query(default=None, alias="to"),
+    snapshot_at: Optional[str] = Query(default=None),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> WorkerTokenUsageSummary:
+    from cli_agent_orchestrator.clients.database import summarize_worker_token_usage
+
+    filters = _token_usage_filters_or_422(
+        provider=provider,
+        agent=agent,
+        model=model,
+        effort=effort,
+        from_at=from_at,
+        to_at=to_at,
+    )
+    snapshot = _token_usage_snapshot(snapshot_at)
+    try:
+        summary = await asyncio.to_thread(
+            summarize_worker_token_usage,
+            filters,
+            snapshot_at=snapshot,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to summarize token usage: {str(exc)}",
+        ) from exc
+    return WorkerTokenUsageSummary.model_validate(summary)
+
+
+@app.get("/token-usage", response_model=List[WorkerTokenUsageRecord])
+async def list_token_usage(
+    terminal_id: Optional[str] = Query(default=None),
+    run_id: Optional[str] = Query(default=None),
+    step_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> List[WorkerTokenUsageRecord]:
+    """List durable worker token usage after terminals have been deleted."""
+    from cli_agent_orchestrator.clients.database import list_worker_token_usage
+
+    try:
+        rows = await asyncio.to_thread(
+            list_worker_token_usage,
+            terminal_id=terminal_id,
+            run_id=run_id,
+            step_id=step_id,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list token usage: {str(exc)}",
+        )
+    return [WorkerTokenUsageRecord.model_validate(row) for row in rows]
+
+
 @app.get("/terminals/{terminal_id}", response_model=Terminal)
 async def get_terminal(terminal_id: TerminalId) -> Terminal:
     try:
@@ -2176,21 +2482,34 @@ async def run_step(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     try:
-        result = await run_agent_step(
-            provider=body.provider,
-            agent=body.agent,
-            prompt=body.prompt,
-            session_name=body.session_name,
-            reuse_terminal_id=body.reuse_terminal_id,
-            teardown=body.teardown,
-            timeout=body.timeout,
-            working_directory=body.working_directory,
-            caller_id=body.caller_id,
-            allowed_tools=body.allowed_tools,
-            registry=get_plugin_registry(request),
-            env_vars=body.env_vars,
-            on_terminal_created=on_terminal_created,
-        )
+        if body.execution_mode == "structured":
+            result = await run_structured_worker_step(
+                provider=body.provider,
+                agent=body.agent,
+                prompt=body.prompt,
+                timeout=body.timeout,
+                working_directory=body.working_directory,
+                allowed_tools=body.allowed_tools,
+                env_vars=body.env_vars,
+                progress=body.progress,
+            )
+        else:
+            result = await run_agent_step(
+                provider=body.provider,
+                agent=body.agent,
+                prompt=body.prompt,
+                session_name=body.session_name,
+                reuse_terminal_id=body.reuse_terminal_id,
+                teardown=body.teardown,
+                timeout=body.timeout,
+                working_directory=body.working_directory,
+                caller_id=body.caller_id,
+                allowed_tools=body.allowed_tools,
+                registry=get_plugin_registry(request),
+                env_vars=body.env_vars,
+                on_terminal_created=on_terminal_created,
+                progress=body.progress,
+            )
         # Success -> transition the script step RUNNING->COMPLETED (no-op for
         # non-script callers). Before building the response so a settle failure
         # is logged, not raised.
@@ -2199,6 +2518,12 @@ async def run_step(
             terminal_id=result.terminal_id,
             last_message=result.last_message,
             status=(result.status.value if hasattr(result.status, "value") else str(result.status)),
+            token_usage=result.token_usage,
+        )
+    except StructuredWorkerError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": str(e), "kind": "error", "terminal_id": None},
         )
     except StepExecutionError as e:
         # The step did not complete successfully. Distinguish a worker that

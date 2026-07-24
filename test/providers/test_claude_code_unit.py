@@ -1402,7 +1402,16 @@ class TestClaudeCodeProviderMisc:
         command = provider._build_claude_command()
 
         assert "claude --dangerously-skip-permissions" in command
+        assert "--session-id" in command
+        assert provider._build_claude_command() == command
         assert "--permission-mode" not in command
+
+    def test_build_structured_command_uses_print_json_without_changing_interactive_command(self):
+        provider = ClaudeCodeProvider("test123", "test-session", "window-0")
+        command = provider.build_structured_command()
+
+        assert command[:3] == ["claude", "-p", "--dangerously-skip-permissions"]
+        assert command[-2:] == ["--output-format", "json"]
 
     @patch("cli_agent_orchestrator.providers.claude_code.load_agent_profile")
     def test_build_claude_command_with_system_prompt(self, mock_load):

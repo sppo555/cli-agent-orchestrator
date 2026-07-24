@@ -65,6 +65,7 @@ from cli_agent_orchestrator.services.step_output_store import (
     _validate_key_part,
     step_output_store,
 )
+from cli_agent_orchestrator.services.token_usage import TokenUsage, add_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class StepRunState:
     output: Optional[StepOutputRecord] = None
     terminal_id: Optional[str] = None
     error: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
     which_guard_fired: Optional[str] = None  # RESERVED (N8) — always None in MVP
     iterations_run: Optional[int] = None  # RESERVED (N8) — always None in MVP
 
@@ -532,9 +534,11 @@ async def _collect_structured_output(record: RunRecord, step: WorkflowStep) -> S
                 "CAO_WORKFLOW_RUN_ID": record.run_id,
                 "CAO_WORKFLOW_STEP_ID": step.id,
             },
+            progress=step.progress,
             cancel_event=record.cancel_event,
         )
         st.terminal_id = result.terminal_id
+        st.token_usage = add_token_usage(st.token_usage, result.token_usage)
         rec = step_output_store.get(record.run_id, step.id)
         if rec is not None and rec.validated:
             st.output = rec
@@ -562,6 +566,7 @@ async def _run_step(record: RunRecord, step: WorkflowStep) -> None:
     record.current_step_id = step.id
     st = record.step_states[step.id]
     st.state = StepState.RUNNING
+    st.token_usage = None
     # Journal write-through (§1): record the step RUNNING + the live current step.
     # Awaited sequentially off the loop (blocking sqlite must not stall the engine).
     await _ajournal(_journal_step, record, step.id)
@@ -585,9 +590,11 @@ async def _run_step(record: RunRecord, step: WorkflowStep) -> None:
                     "CAO_WORKFLOW_RUN_ID": record.run_id,
                     "CAO_WORKFLOW_STEP_ID": step.id,
                 },
+                progress=step.progress,
                 cancel_event=record.cancel_event,
             )
             st.terminal_id = result.terminal_id
+            st.token_usage = add_token_usage(st.token_usage, result.token_usage)
             # Resolve the structured return INSIDE the try so a crash during the
             # reprompt (§3 re-raises StepExecutionError) is caught below and
             # consumes an attempt (Q6=A, Trace C).
@@ -657,6 +664,7 @@ def _build_result(record: RunRecord, order: List[WorkflowStep]) -> WorkflowRunRe
                 attempts=st.attempts,
                 output=st.output.output if st.output is not None else None,
                 error=st.error,
+                token_usage=st.token_usage,
             )
         )
     return WorkflowRunResult(

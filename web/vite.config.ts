@@ -1,12 +1,19 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   plugins: [react()],
   build: {
     outDir: '../src/cli_agent_orchestrator/web_ui',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        token: fileURLToPath(new URL('./token.html', import.meta.url)),
+      },
+    },
   },
   test: {
     globals: true,
@@ -24,6 +31,7 @@ export default defineConfig({
       '/settings': { target: 'http://localhost:9889', changeOrigin: true },
       '/flows': { target: 'http://localhost:9889', changeOrigin: true },
       '/memory': { target: 'http://localhost:9889', changeOrigin: true },
+      '/token-usage': { target: 'http://localhost:9889', changeOrigin: true },
       '/graph': { target: 'http://localhost:9889', changeOrigin: true },
     },
   },

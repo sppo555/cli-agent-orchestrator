@@ -142,6 +142,14 @@ def _no_llm_compile_in_tests(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_agent_step_usage_persistence():
+    """Never let synthetic agent-step attempts write to the user's live DB."""
+
+    with patch("cli_agent_orchestrator.services.agent_step.persist_worker_token_usage"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_cao_env(monkeypatch):
     """Strip CAO runtime env vars that leak when the suite runs inside a CAO terminal.
 

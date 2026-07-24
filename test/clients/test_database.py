@@ -14,6 +14,7 @@ from cli_agent_orchestrator.clients.database import (
     FlowModel,
     InboxModel,
     TerminalModel,
+    _migrate_worker_token_usage,
     create_flow,
     create_inbox_message,
     create_terminal,
@@ -24,11 +25,14 @@ from cli_agent_orchestrator.clients.database import (
     get_inbox_messages,
     get_pending_messages,
     get_terminal_metadata,
+    get_worker_token_usage_totals,
     init_db,
     list_flows,
     list_pending_receiver_ids_by_provider,
     list_pending_receiver_ids_older_than,
     list_terminals_by_session,
+    list_worker_token_usage,
+    record_worker_token_usage,
     update_flow_enabled,
     update_flow_run_times,
     update_last_active,
@@ -36,6 +40,7 @@ from cli_agent_orchestrator.clients.database import (
     update_terminal_shell_command,
 )
 from cli_agent_orchestrator.models.inbox import MessageStatus
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 
 
 @pytest.fixture
@@ -684,11 +689,51 @@ class TestInitDb:
 
     @patch("cli_agent_orchestrator.clients.database.Base")
     @patch("cli_agent_orchestrator.clients.database._migrate_project_aliases_schema")
-    def test_init_db(self, mock_alias_migrate, mock_base):
+    @patch("cli_agent_orchestrator.clients.database._migrate_worker_token_usage")
+    def test_init_db(self, mock_worker_usage, mock_alias_migrate, mock_base):
         """Test database initialization."""
         init_db()
 
         mock_base.metadata.create_all.assert_called_once()
+
+
+class TestWorkerTokenUsage:
+    def test_usage_migration_and_record_survive_terminal_deletion(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        from cli_agent_orchestrator.clients import database as db_mod
+
+        db_file = tmp_path / "usage.db"
+        monkeypatch.setattr("cli_agent_orchestrator.constants.DATABASE_FILE", db_file)
+
+        _migrate_worker_token_usage()
+        _migrate_worker_token_usage()
+        with sqlite3.connect(str(db_file)) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(worker_token_usage)")}
+        assert {"model", "effort", "progress"}.issubset(columns)
+
+        usage = TokenUsage(
+            input_tokens=10,
+            output_tokens=20,
+            total_tokens=30,
+            model="claude-sonnet",
+            effort="high",
+            progress=".cao/worker-results/20260713T010600Z-v0.7.0-slice7-admin-reset-plan-review-r2-reviewer.md",
+        )
+        record_worker_token_usage(
+            terminal_id="abc12345",
+            provider="claude_code",
+            agent="reviewer",
+            run_id="run-1",
+            step_id="slice7",
+            usage=usage,
+        )
+
+        rows = list_worker_token_usage(terminal_id="abc12345")
+        assert rows[0]["model"] == "claude-sonnet"
+        assert rows[0]["effort"] == "high"
+        assert rows[0]["progress"].endswith("r2-reviewer.md")
+        assert get_worker_token_usage_totals("run-1")["slice7"]["total_tokens"] == 30
 
 
 class TestTerminalsSchemaMigration:

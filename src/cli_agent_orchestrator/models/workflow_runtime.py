@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from cli_agent_orchestrator.models.token_usage import TokenUsage
+
 
 class StepState(str, Enum):
     """Per-step run state. Defined in Bolt 1; instantiated by the engine (N5)."""
@@ -147,6 +149,7 @@ class StepResult(BaseModel):
     attempts: int
     output: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
 
 
 class WorkflowRunResult(BaseModel):
