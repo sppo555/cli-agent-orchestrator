@@ -4,8 +4,11 @@ import os
 from unittest.mock import MagicMock, patch
 
 import requests
+import pytest
 
 from cli_agent_orchestrator.mcp_server.server import (
+    MEMORY_TERMINAL_CONTEXT_ERROR,
+    MemoryTerminalContextError,
     _current_terminal_id,
     _get_cleanup_nudge,
     _get_terminal_context_from_env,
@@ -92,10 +95,13 @@ class TestGetCleanupNudge:
 
 
 class TestMemoryTerminalContext:
-    def test_malformed_terminal_id_degrades_without_lookup(self):
+    def test_malformed_terminal_id_fails_closed_without_lookup(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "supervisor-abc123"}):
             with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
-                assert _get_terminal_context_from_env() is None
+                with pytest.raises(
+                    MemoryTerminalContextError, match=MEMORY_TERMINAL_CONTEXT_ERROR
+                ):
+                    _get_terminal_context_from_env()
         mock_get.assert_not_called()
 
 
