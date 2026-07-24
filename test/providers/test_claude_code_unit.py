@@ -1614,6 +1614,25 @@ class TestClaudeCodeProviderModelFlag:
         assert "--model" not in command
 
 
+class TestClaudeCodeProviderEffortFlag:
+    """Tests that profile.effort is forwarded to Claude Code via --effort."""
+
+    @patch("cli_agent_orchestrator.providers.claude_code.load_agent_profile")
+    def test_build_command_appends_effort_when_set(self, mock_load):
+        mock_profile = MagicMock()
+        mock_profile.model = None
+        mock_profile.effort = "high"
+        mock_profile.system_prompt = None
+        mock_profile.mcpServers = None
+        mock_profile.permissionMode = None
+        mock_load.return_value = mock_profile
+
+        provider = ClaudeCodeProvider("tid", "sess", "win", "agent")
+        command = provider._build_claude_command()
+
+        assert "--effort high" in command
+
+
 class TestClaudeCodeProviderPermissionMode:
 
     @patch("cli_agent_orchestrator.providers.claude_code.load_agent_profile")

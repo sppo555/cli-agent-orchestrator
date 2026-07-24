@@ -73,6 +73,10 @@ class AgentProfile(BaseModel):
     hooks: Optional[Dict[str, Any]] = None
     useLegacyMcpJson: Optional[bool] = None
     model: Optional[str] = None
+    # claude_code-only. Per-agent reasoning effort, passed as `--effort <level>`
+    # (e.g. "low" / "medium" / "high"). Lets a single worker run hotter/cooler
+    # than the global CLAUDE_CODE_EFFORT_LEVEL without touching the environment.
+    effort: Optional[str] = None
     permissionMode: Optional[PermissionMode] = None
     native_agent: Optional[str] = None  # Claude Code native agent name (thin-wrapper mode)
 
