@@ -57,6 +57,10 @@ from cli_agent_orchestrator.services.fifo_reader import fifo_manager
 from cli_agent_orchestrator.services.herdr_inbox_registry import get_herdr_inbox_service
 from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
+from cli_agent_orchestrator.services.render_viewer import (
+    nudge_unattended_render,
+    render_during_init,
+)
 from cli_agent_orchestrator.services.session_env import (
     clear_session_env,
     get_session_env,
@@ -87,6 +91,39 @@ _deferred_init_tasks: set = set()
 
 class TerminalInputBlockedError(Exception):
     """Raised when orchestrated input would answer an active interactive prompt."""
+
+
+def nudge_terminal_render(terminal_id: str) -> bool:
+    """Force a safe one-shot redraw for a tmux terminal.
+
+    Socket/event-driven backends do not need a viewer and are left untouched.
+    No text or control input is sent to the agent.
+    """
+    if get_backend().supports_event_inbox():
+        logger.debug("Skipping unattended redraw for event-driven terminal %s", terminal_id)
+        return False
+    metadata = get_terminal_metadata(terminal_id)
+    if not metadata:
+        logger.warning("Unattended redraw failed for terminal %s: metadata not found", terminal_id)
+        return False
+    session = metadata["tmux_session"]
+    window = metadata["tmux_window"]
+    ok = nudge_unattended_render(session, window)
+    if ok:
+        logger.info(
+            "Unattended redraw succeeded terminal=%s session=%s window=%s",
+            terminal_id,
+            session,
+            window,
+        )
+    else:
+        logger.warning(
+            "Unattended redraw failed terminal=%s session=%s window=%s",
+            terminal_id,
+            session,
+            window,
+        )
+    return ok
 
 
 def inject_memory_context(first_message: str, terminal_id: str) -> str:
@@ -136,6 +173,23 @@ RUNTIME_SKILL_PROMPT_PROVIDERS = {
     ProviderType.KIMI_CLI.value,
     ProviderType.ANTIGRAVITY_CLI.value,
 }
+
+
+async def _initialize_provider_with_render(provider_instance) -> None:
+    """Initialize a provider while keeping unattended tmux TUIs rendering.
+
+    Both synchronous terminal creation and deferred ``assign`` initialization
+    must use this helper.  Keeping the policy in one place prevents a new init
+    path from bypassing the headless viewer and waiting forever for a Web
+    terminal to force the first idle repaint.
+    """
+    if get_backend().supports_event_inbox():
+        await provider_instance.initialize()
+        return
+
+    with render_during_init(provider_instance.session_name, provider_instance.window_name):
+        await provider_instance.initialize()
+
 
 # Providers whose tool restrictions are prompt-level text only (no native
 # blocking mechanism) — a restricted policy on these is advisory, not enforced.
@@ -377,7 +431,13 @@ async def create_terminal(
                 registry,
             )
         else:
-            await provider_instance.initialize()
+            # An unattended tmux window does not flush its TUI redraws through
+            # pipe-pane, so the StatusMonitor never sees the CLI's idle frame and
+            # initialize() (wait_for_shell / wait_until_status) times out unless a
+            # human opens the Web terminal. Hold a headless render-viewer on the
+            # pane for the duration of init so the idle box flows to the buffer.
+            # pipe-pane backends only; herdr delivers status via socket events.
+            await _initialize_provider_with_render(provider_instance)
 
             # Persist shell_command baseline if the provider captured one
             shell_command = provider_instance.shell_baseline
@@ -668,7 +728,7 @@ def _schedule_deferred_init(
     async def _run() -> None:
         caller_id: Optional[str] = None
         try:
-            await provider_instance.initialize()
+            await _initialize_provider_with_render(provider_instance)
             shell_command = provider_instance.shell_baseline
             if isinstance(shell_command, str) and shell_command:
                 update_terminal_shell_command(terminal_id, shell_command)

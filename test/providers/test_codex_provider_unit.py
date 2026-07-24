@@ -342,6 +342,25 @@ class TestCodexBuildCommand:
         assert "CAO_TERMINAL_ID" in command
 
     @patch("cli_agent_orchestrator.providers.codex.load_agent_profile")
+    def test_build_command_http_mcp_does_not_inject_stdio_env_vars(self, mock_load_profile):
+        mock_profile = MagicMock()
+        mock_profile.model = None
+        mock_profile.system_prompt = ""
+        mock_profile.mcpServers = {
+            "context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}
+        }
+        mock_profile.codexProfile = None
+        mock_load_profile.return_value = mock_profile
+
+        provider = CodexProvider("test1234", "test-session", "window-0", "test_agent")
+        command = provider._build_codex_command()
+
+        assert "mcp_servers.context7.url" not in command
+        assert "mcp_servers.context7.tool_timeout_sec" not in command
+        assert "mcp_servers.context7.env_vars" not in command
+        assert "mcp_servers.context7.command" not in command
+
+    @patch("cli_agent_orchestrator.providers.codex.load_agent_profile")
     def test_build_command_empty_system_prompt(self, mock_load_profile):
         mock_profile = MagicMock()
         mock_profile.model = None

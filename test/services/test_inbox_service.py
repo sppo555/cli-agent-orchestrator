@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from cli_agent_orchestrator.backends.base import TerminalNotFoundError
-from cli_agent_orchestrator.constants import INBOX_RECONCILE_GRACE_SECONDS
+from cli_agent_orchestrator.constants import (
+    INBOX_REDRAW_COOLDOWN_SECONDS,
+    INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
+    INBOX_RECONCILE_GRACE_SECONDS,
+)
 from cli_agent_orchestrator.models.inbox import InboxMessage, MessageStatus
 from cli_agent_orchestrator.models.terminal import TerminalStatus
 from cli_agent_orchestrator.services.inbox_service import InboxService
@@ -425,6 +429,96 @@ class TestReconcileOrphanedMessages:
         svc.reconcile_orphaned_messages()
 
         assert svc.deliver_pending.call_count == 2
+
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_nudges_stale_processing_terminal_once(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.PROCESSING
+        mock_terminal_service.nudge_terminal_render.return_value = True
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+        svc.reconcile_orphaned_messages()
+
+        mock_terminal_service.nudge_terminal_render.assert_called_once_with("receiver-1")
+
+    @patch("cli_agent_orchestrator.services.inbox_service.time.monotonic")
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_nudges_again_after_success_cooldown(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service, mock_monotonic
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.PROCESSING
+        mock_terminal_service.nudge_terminal_render.return_value = True
+        mock_monotonic.side_effect = [100.0, 100.0 + INBOX_REDRAW_COOLDOWN_SECONDS]
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+        svc.reconcile_orphaned_messages()
+
+        assert mock_terminal_service.nudge_terminal_render.call_count == 2
+
+    @patch("cli_agent_orchestrator.services.inbox_service.time.monotonic")
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_failed_nudge_uses_short_retry_cooldown(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service, mock_monotonic
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.PROCESSING
+        mock_terminal_service.nudge_terminal_render.return_value = False
+        mock_monotonic.side_effect = [
+            100.0,
+            100.0 + INBOX_REDRAW_FAIL_COOLDOWN_SECONDS - 0.1,
+            100.0 + INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
+        ]
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+        svc.reconcile_orphaned_messages()
+        svc.reconcile_orphaned_messages()
+
+        assert mock_terminal_service.nudge_terminal_render.call_count == 2
+
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_does_not_nudge_ready_terminal(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.COMPLETED
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+
+        mock_terminal_service.nudge_terminal_render.assert_not_called()
+
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.status_monitor")
+    @patch("cli_agent_orchestrator.services.inbox_service.list_pending_receiver_ids_older_than")
+    def test_does_not_nudge_idle_terminal(
+        self, mock_list_receivers, mock_monitor, mock_terminal_service
+    ):
+        mock_list_receivers.return_value = ["receiver-1"]
+        mock_monitor.get_status.return_value = TerminalStatus.IDLE
+
+        svc = InboxService()
+        svc.deliver_pending = MagicMock()
+        svc.reconcile_orphaned_messages()
+
+        mock_terminal_service.nudge_terminal_render.assert_not_called()
 
 
 class TestRun:
