@@ -62,13 +62,13 @@ from cli_agent_orchestrator.services.plugin_dispatch import (
     dispatch_plugin_event,
     dispatch_plugin_event_strict,
 )
-from cli_agent_orchestrator.services.render_viewer import (
-    nudge_unattended_render,
-    render_during_init,
-)
 from cli_agent_orchestrator.services.provider_memory_files import (
     PROTECTED_PROVIDER_MEMORY_PLUGINS,
     prepare_provider_memory_file,
+)
+from cli_agent_orchestrator.services.render_viewer import (
+    nudge_unattended_render,
+    render_during_init,
 )
 from cli_agent_orchestrator.services.session_env import (
     clear_session_env,

@@ -6,8 +6,8 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 
 - Repo: `/Users/alex/Developer/cli-agent-orchestrator`
 - Integration branch: `cao-tailscale-integration`
-- Base: `origin/main` at `deebf65` (previous: `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
-- Integration tip: `ea9320c` (4.15 token usage documentation after the 2026-07-12 fork-sync rebuild; merge tip `4cf4976`, previous tip `8c7416c`)
+- Base: `origin/main` at `2c1270c` (previous: `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
+- Latest rebuild: 2026-07-24; merge tip before this documentation update was `3943150`, followed by 4.19 compatibility/test merges.
 - Local package customizations included here:
   - 4.1 Codex pyte status
   - 4.3 Claude Code `--effort`
@@ -20,7 +20,15 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 - 4.14 worker init status recovery from `UNKNOWN`
 - 4.15 durable worker token usage context, including model, effort, and progress/artifact path
 
-## Latest Sync Notes (2026-07-12)
+## Latest Sync Notes (2026-07-24)
+
+- Upstream range `edf61ca..2c1270c` contains five commits: tmux native protected paste (`bf66559`), MCP terminal-ID validation (`77befe8`), pre-push warning suppression (`48181e8`), and two documentation reorganizations (`30dead6`, `2c1270c`).
+- No commit changes or duplicates the local version-number/token-usage functionality. There are no changes to the token-usage owner paths from 4.17.6/4.18.
+- `77befe8` is a partial shared-area overlap with 4.19, not the same feature. The integration accepts upstream's eight-character lowercase-hex terminal IDs and preserves 4.19's fail-closed memory identity behavior.
+- `bf66559` is independent of the Web clipboard customization: it fixes tmux backend paste transport, while 4.7 handles browser clipboard shortcuts.
+- Validation: 573 passed, 3 skipped, 1 xfailed in the broad provider/status/tmux/MCP/memory batch after stale tests were updated; focused overlap tests 39 passed; WebSocket tests 12 passed; Black/isort, Web build, and all 103 Web tests passed.
+
+## Previous Sync Notes (2026-07-12)
 
 - Upstream range `84d79ff..deebf65` adds PATH-independent resolution for the bundled `cao-mcp-server`, plus v2.3.0/release and CI updates.
 - The MCP resolution change touches Codex, Claude, and Agy provider files alongside customizations 4.1, 4.3, and 4.4. The merge preserved both behaviors: rendered-screen status detection, Claude `--effort`, and proactive Agy workspace trust.

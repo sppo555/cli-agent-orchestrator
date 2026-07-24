@@ -1,8 +1,8 @@
 # CAO Customizations Progress
 
 > Current clean integration branch: `cao-tailscale-integration` (fixed name — the deployment target that CAO-Tailscale's bootstrap installs; rebuilt onto the latest fork-synced main each cycle, so the name never changes even though the base SHA does).
-> Base: `origin/main` at `deebf65` (`fix(ci): sync devcontainer feature version with pyproject.toml on release (#419)`). Previous bases: `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
-> Latest rebuild: 2026-07-12 after fork sync `84d79ff..deebf65`; upstream added bundled `cao-mcp-server` command resolution, release metadata, and CI/dependency updates. Provider overlap was reviewed and merged with customization behavior preserved. Previous integration tip was `8c7416c`.
+> Base: `origin/main` at `2c1270c` (`docs: reconcile historical implementation records (#499)`). Previous bases include `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
+> Latest rebuild: 2026-07-24 after fork sync `edf61ca..2c1270c`; upstream added tmux paste handling, MCP terminal-ID validation, hook and documentation fixes. No upstream commit duplicates the local version/token-usage functionality. MCP identity validation partially overlapped 4.19 and was integrated with its fail-closed memory boundary preserved.
 
 ## Current Decision
 
@@ -33,6 +33,15 @@
 | 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
 | 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | `12a8af9` | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
 | Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
+
+## 2026-07-24 Sync Record
+
+- Upstream range: `edf61ca..2c1270c` (5 commits).
+- `bf66559` replaces hand-crafted bracketed-paste markers with tmux `paste-buffer -p`; no customization or version/token-usage overlap.
+- `77befe8` validates `CAO_TERMINAL_ID` as eight lowercase hexadecimal characters before MCP API calls. This touches shared handoff/cleanup code but does not duplicate any version-number feature. It partially overlaps 4.19's identity boundary: malformed declared identities continue to fail closed for memory operations rather than degrading to an unbound operator.
+- `48181e8` suppresses pytest warning summaries in the pre-push hook; `30dead6` and `2c1270c` reorganize/reconcile documentation. None overlaps version or token-usage behavior.
+- Branch conflicts: 4.18 documentation was adapted to the new concise upstream layout while preserving Grok lifecycle-only guidance; 4.19 kept both upstream ID validation and local memory isolation; integration kept both 4.13 render-viewer imports and 4.19 strict memory dispatch.
+- Validation: provider/status/tmux/MCP/memory batch ended with 573 passed, 3 skipped, 1 xfailed after correcting three stale test expectations; focused overlap rerun 39 passed; WebSocket 12 passed; Black/isort passed; Web build passed; Web tests 103 passed.
 
 ## 2026-07-12 Sync Record
 
