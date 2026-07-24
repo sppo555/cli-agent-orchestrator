@@ -11,6 +11,7 @@ import signal
 import struct
 import subprocess
 import termios
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
+from cli_agent_orchestrator.backends.tmux_backend import TmuxBackend
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
     get_inbox_messages,
@@ -2883,14 +2885,52 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         await websocket.close(code=4003, reason="Invalid tmux target name")
         return
 
+    backend = get_backend()
+    viewer_session: Optional[str] = None
     try:
-        attach_command = await asyncio.to_thread(
-            get_backend().prepare_web_attach, session_name, window_name
-        )
-    except TerminalBackendError as e:
+        if isinstance(backend, TmuxBackend):
+            # A grouped tmux session shares panes with the source while keeping
+            # its own current window, so one browser viewer cannot yank every
+            # other attached client to a different window.
+            viewer_session = f"caoview_{uuid.uuid4().hex[:12]}"
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-t", session_name, "-s", viewer_session],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"],
+                check=False,
+                capture_output=True,
+            )
+            attach_command = backend.prepare_web_attach(viewer_session, window_name)
+        else:
+            attach_command = await asyncio.to_thread(
+                backend.prepare_web_attach, session_name, window_name
+            )
+    except (TerminalBackendError, subprocess.CalledProcessError, OSError) as e:
+        if viewer_session is not None:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", viewer_session],
+                check=False,
+                capture_output=True,
+            )
         logger.error(f"Web attach failed for terminal {terminal_id}: {e}")
         await websocket.close(code=4004, reason="Failed to attach terminal")
         return
+
+    def _cleanup_web_attach() -> None:
+        """Best-effort teardown for a per-connection tmux viewer session."""
+        if viewer_session is None:
+            return
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", viewer_session],
+                check=False,
+                capture_output=True,
+            )
+        except OSError:
+            pass
 
     # Create PTY pair for backend attach
     master_fd, slave_fd = pty.openpty()
@@ -3012,6 +3052,10 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         except asyncio.TimeoutError:
             proc.kill()
             await asyncio.to_thread(proc.wait)
+        # Tear down the per-connection grouped viewer session. Killing a
+        # grouped session only removes this viewer; the original CAO session
+        # and its windows/panes survive because they belong to the group.
+        await asyncio.to_thread(_cleanup_web_attach)
 
 
 # ── Flow management endpoints ────────────────────────────────────────
