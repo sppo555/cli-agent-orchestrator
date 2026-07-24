@@ -30,7 +30,7 @@ def _service(tmp_path: Path) -> tuple[MemoryService, object]:
 
 def _project_context(tmp_path: Path, *, caller_scope: str = "project") -> dict:
     return {
-        "terminal_id": "term-project-worker",
+        "terminal_id": "deadbeef",
         "session_name": "scope-isolation",
         "agent_profile": "developer",
         "provider": "codex",
@@ -235,14 +235,14 @@ class TestGlobalProjectBoundary:
 
 class TestTerminalCallerScope:
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=False)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=False)
     def test_verified_terminal_context_is_project_bounded(self, mock_get: Mock) -> None:
         from cli_agent_orchestrator.mcp_server.server import _get_terminal_context_from_env
 
         terminal_response = Mock()
         terminal_response.raise_for_status.return_value = None
         terminal_response.json.return_value = {
-            "id": "term-project-worker",
+            "id": "deadbeef",
             "session_name": "scope-isolation",
             "provider": "codex",
             "agent_profile": "developer",
@@ -268,7 +268,7 @@ class TestTerminalCallerScope:
         [requests.Timeout("timeout"), requests.ConnectionError("refused")],
     )
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=True)
     def test_terminal_lookup_transport_failure_is_fail_closed(
         self, mock_get: Mock, failure: Exception
     ) -> None:
@@ -284,7 +284,7 @@ class TestTerminalCallerScope:
 
     @pytest.mark.parametrize("status", [404, 500])
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=True)
     def test_terminal_lookup_http_failure_is_fail_closed(self, mock_get: Mock, status: int) -> None:
         from cli_agent_orchestrator.mcp_server.server import (
             MemoryTerminalContextError,
@@ -302,7 +302,7 @@ class TestTerminalCallerScope:
         [None, [], {}, {"id": "wrong", "session_name": "s", "provider": "codex"}],
     )
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=True)
     def test_malformed_or_incomplete_terminal_metadata_is_fail_closed(
         self, mock_get: Mock, metadata: object
     ) -> None:
@@ -319,14 +319,14 @@ class TestTerminalCallerScope:
             _get_terminal_context_from_env()
 
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=True)
     def test_working_directory_failure_stays_project_bounded(self, mock_get: Mock) -> None:
         from cli_agent_orchestrator.mcp_server.server import _get_terminal_context_from_env
 
         terminal_response = Mock()
         terminal_response.raise_for_status.return_value = None
         terminal_response.json.return_value = {
-            "id": "term-project-worker",
+            "id": "deadbeef",
             "session_name": "scope-isolation",
             "provider": "codex",
         }
@@ -335,7 +335,7 @@ class TestTerminalCallerScope:
         context = _get_terminal_context_from_env()
 
         assert context == {
-            "terminal_id": "term-project-worker",
+            "terminal_id": "deadbeef",
             "session_name": "scope-isolation",
             "provider": "codex",
             "agent_profile": None,
@@ -344,7 +344,7 @@ class TestTerminalCallerScope:
 
     @patch("cli_agent_orchestrator.mcp_server.server.requests.get")
     @patch("cli_agent_orchestrator.services.memory_service.MemoryService")
-    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "term-project-worker"}, clear=True)
+    @patch.dict("os.environ", {"CAO_TERMINAL_ID": "deadbeef"}, clear=True)
     def test_mcp_returns_structured_identity_failure_without_storing(
         self, mock_service_class: Mock, mock_get: Mock
     ) -> None:
