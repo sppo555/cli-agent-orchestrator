@@ -360,6 +360,51 @@ def test_mcp_config_path_default_location():
     assert path.parent.parent.name == ".gemini"
 
 
+def test_settings_path_default_location():
+    path = make_provider()._settings_path()
+    assert path.name == "settings.json"
+    assert path.parent.name == "antigravity-cli"
+    assert path.parent.parent.name == ".gemini"
+
+
+def test_trust_workspace_adds_and_cleanup_removes_path(tmp_path):
+    import json
+
+    settings = tmp_path / "settings.json"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    p = make_provider()
+
+    with patch.object(AntigravityCliProvider, "_settings_path", return_value=settings):
+        p._trust_workspace(str(workspace))
+        data = json.loads(settings.read_text())
+        assert str(workspace) in data["trustedWorkspaces"]
+        assert p._trusted_workspace == str(workspace)
+
+        p.cleanup()
+        data = json.loads(settings.read_text())
+        assert str(workspace) not in data["trustedWorkspaces"]
+        assert p._trusted_workspace is None
+
+
+def test_trust_workspace_preserves_preexisting_trusted_path(tmp_path):
+    import json
+
+    settings = tmp_path / "settings.json"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    settings.write_text(json.dumps({"trustedWorkspaces": [str(workspace)]}))
+    p = make_provider()
+
+    with patch.object(AntigravityCliProvider, "_settings_path", return_value=settings):
+        p._trust_workspace(str(workspace))
+        assert p._trusted_workspace is None
+
+        p.cleanup()
+        data = json.loads(settings.read_text())
+        assert data["trustedWorkspaces"] == [str(workspace)]
+
+
 # --------------------------------------------------------------------------- #
 # Command building — skill prompt + soft tool restriction
 # --------------------------------------------------------------------------- #
