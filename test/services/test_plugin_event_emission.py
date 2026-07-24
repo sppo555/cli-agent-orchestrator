@@ -14,6 +14,7 @@ from cli_agent_orchestrator.plugins import (
     PostKillSessionEvent,
     PostKillTerminalEvent,
     PostSendMessageEvent,
+    PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.services.inbox_service import inbox_service
 from cli_agent_orchestrator.services.session_service import create_session, delete_session
@@ -29,6 +30,7 @@ def _registry_mock() -> MagicMock:
 
     registry = MagicMock()
     registry.dispatch = AsyncMock()
+    registry.dispatch_strict = AsyncMock()
     return registry
 
 
@@ -170,8 +172,11 @@ class TestTerminalPluginEvents:
         registry = _registry_mock()
         call_order: list[str] = []
 
-        async def record_dispatch(*_args):
-            call_order.append("dispatch")
+        async def record_post_dispatch(*_args):
+            call_order.append("post_dispatch")
+
+        async def record_pre_dispatch(*_args):
+            call_order.append("pre_dispatch")
 
         mock_generate_terminal_id.return_value = "abcd1234"
         mock_generate_window_name.return_value = "developer-abcd"
@@ -197,10 +202,11 @@ class TestTerminalPluginEvents:
         log_path = MagicMock()
         mock_log_dir.__truediv__.return_value = log_path
         mock_tmux.pipe_pane.side_effect = lambda *_args, **_kwargs: call_order.append("pipe_pane")
-        registry.dispatch.side_effect = record_dispatch
+        registry.dispatch.side_effect = record_post_dispatch
+        registry.dispatch_strict.side_effect = record_pre_dispatch
 
         terminal = await create_terminal(
-            provider="kiro_cli",
+            provider="opencode_cli",
             agent_profile="developer",
             session_name="demo",
             new_session=True,
@@ -215,14 +221,24 @@ class TestTerminalPluginEvents:
         await asyncio.sleep(0)
         # pipe-pane is wired up before the provider initializes in the merged
         # event-driven flow; the dispatch still fires last, after all setup.
-        assert call_order == ["db_create", "pipe_pane", "provider_initialize", "dispatch"]
+        assert call_order == [
+            "db_create",
+            "pipe_pane",
+            "pre_dispatch",
+            "provider_initialize",
+            "post_dispatch",
+        ]
+        pre_event_type, pre_event = registry.dispatch_strict.await_args.args
+        assert pre_event_type == "pre_initialize_terminal"
+        assert isinstance(pre_event, PreInitializeTerminalEvent)
+        assert pre_event.terminal_id == "abcd1234"
         event_type, event = registry.dispatch.await_args.args
         assert event_type == "post_create_terminal"
         assert isinstance(event, PostCreateTerminalEvent)
         assert event.session_id == "cao-demo"
         assert event.terminal_id == "abcd1234"
         assert event.agent_name == "developer"
-        assert event.provider == "kiro_cli"
+        assert event.provider == "opencode_cli"
 
     @pytest.mark.asyncio
     @patch("cli_agent_orchestrator.services.terminal_service.TERMINAL_LOG_DIR")
@@ -266,7 +282,7 @@ class TestTerminalPluginEvents:
 
         with pytest.raises(RuntimeError, match="provider init failed"):
             await create_terminal(
-                provider="kiro_cli",
+                provider="opencode_cli",
                 agent_profile="developer",
                 session_name="demo",
                 new_session=True,

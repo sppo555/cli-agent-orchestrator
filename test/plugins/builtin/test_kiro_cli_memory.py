@@ -63,7 +63,7 @@ async def test_writes_steering_file_on_post_create_terminal(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>\n## Context\n- stan prefers pytest\n</cao-memory>"
 
     monkeypatch.setattr(
@@ -95,7 +95,7 @@ async def test_overwrites_previous_memory_file(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>fresh</cao-memory>"
 
     monkeypatch.setattr(
@@ -125,7 +125,7 @@ async def test_does_not_touch_agent_identity_steering_file(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>hi</cao-memory>"
 
     monkeypatch.setattr(
@@ -149,13 +149,35 @@ async def test_skips_write_when_memory_context_empty(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "cli_agent_orchestrator.plugins.builtin.kiro_cli_memory.MemoryService",
-        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, t: ""})(),
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, t: ""})(),
     )
 
     plugin = KiroCliMemoryPlugin()
     await plugin.on_post_create_terminal(_event())
 
     assert not (tmp_path / STEERING_SUBDIR / MEMORY_FILENAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_empty_context_removes_stale_managed_file_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    steering = tmp_path / STEERING_SUBDIR
+    steering.mkdir(parents=True)
+    target = steering / MEMORY_FILENAME
+    target.write_text("legacy cross-project memory\n", encoding="utf-8")
+    identity = steering / "agent-identity.md"
+    identity.write_bytes(b"user identity bytes\n")
+    _install_metadata_and_cwd(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.kiro_cli_memory.MemoryService",
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, _t: ""})(),
+    )
+
+    await KiroCliMemoryPlugin().on_post_create_terminal(_event())
+
+    assert not target.exists()
+    assert identity.read_bytes() == b"user identity bytes\n"
 
 
 @pytest.mark.asyncio
@@ -192,7 +214,7 @@ async def test_memory_fetch_failure_is_logged_not_raised(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
 
     class ExplodingMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             raise RuntimeError("db on fire")
 
     monkeypatch.setattr(
@@ -260,7 +282,7 @@ async def test_path_containment_guard_rejects_symlink_escape(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>NEW</cao-memory>"
 
     monkeypatch.setattr(
@@ -314,7 +336,7 @@ async def test_missing_working_dir_does_not_escape_handler(
         lambda: type(
             "F",
             (),
-            {"get_memory_context_for_terminal": lambda self, t: "<cao-memory>X</cao-memory>"},
+            {"get_provider_file_memory_context": lambda self, t: "<cao-memory>X</cao-memory>"},
         )(),
     )
 
@@ -332,7 +354,7 @@ async def test_steering_write_is_atomic_no_tmp_left_behind(
     _install_metadata_and_cwd(monkeypatch, tmp_path)
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>X</cao-memory>"
 
     monkeypatch.setattr(

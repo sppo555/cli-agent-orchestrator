@@ -5,14 +5,16 @@ CAO's memory system gives agents persistent, cross-session storage. Agents store
 
 ## Capabilities
 
-- **Five scopes** (`global`, `project`, `session`, `agent`, `federated`) and four type labels.
+- **Five scopes** (`global`, `project`, `session`, `agent`, `federated`) and four type labels,
+  with a hard isolation rule that rejects `scope="global"` + `memory_type="project"`.
 - **Store** via the `memory_store` MCP tool; **recall / forget** via MCP tools or the `cao memory` CLI.
 - **Markdown wiki storage** with a SQLite metadata index.
 - **Search**: keyword (BM25), recency, or hybrid; results ranked by recency, a
   composite 3-factor score (BM25 + recency + usage), or usage.
 - **Cross-references** between related memories, expandable on recall.
-- **Auto-injection** into each provider's config file on terminal creation, plus a
-  `<cao-memory>` block prepended to the agent's first message.
+- **Auto-injection** of project/global memory into each repo-shared provider config
+  file on terminal creation, plus a terminal-private `<cao-memory>` block prepended
+  to the agent's first message.
 - **LLM wiki compaction** (`cao memory compact`) that rewrites topic articles.
 - **Linting** (`cao memory lint`) for orphans, contradictions, stale claims, and more.
 - **Self-healing** (`cao memory heal`) that turns lint findings into fixes — dry-run
@@ -82,7 +84,29 @@ source of "where did my memory go?" questions.
 > There is **no "user folder" and no `user` scope.** `user` is a *type*, not a scope.
 > A "user memory" is simply `memory_type="user"` — by convention stored at
 > `scope="global"` so it applies across every project. The same is true of
-> `feedback` and `reference`: all four types can be attached to any scope.
+> `feedback` and `reference`. The one intentionally invalid pairing is
+> `scope="global"` + `memory_type="project"`; the store boundary rejects it before
+> writing any wiki, index, or SQLite data.
+
+Legacy topics created with that invalid pairing are also rejected at the shared read
+parser, so they cannot appear in recall, related-memory expansion, BM25 results, or
+terminal context injection. `cao memory scope-audit` inventories such topics without
+changing them; `cao memory quarantine-global-project KEY` previews an explicit
+quarantine operation and requires `--apply` before it changes the wiki, index, or SQLite
+metadata. Neither command prints memory bodies.
+
+CAO also refreshes provider-native derivative copies before Codex, Claude Code, or Kiro
+starts. This preparation is owned by the core terminal lifecycle, independent of plugin
+registry presence or built-in plugin discovery, and runs before both synchronous and
+deferred provider initialization. Because these files are shared by every terminal in a
+repository, their managed context contains only `project` and valid `global` memories;
+terminal-private `session` and `agent` memories never enter this channel. An empty current
+context removes an old CAO-managed block from `AGENTS.md` or `.claude/CLAUDE.md`, or deletes Kiro's dedicated
+`.kiro/steering/cao-memory.md`; surrounding user-authored instructions are preserved.
+Path, malformed-marker, or write failures abort provider startup rather than allowing
+stale instructions to load. Malformed Codex/Claude blocks remain byte-identical for
+explicit operator repair; `scrub-provider-files` reports them as blocked and never
+guesses ownership.
 
 ## Memory Scopes
 
@@ -107,6 +131,12 @@ other scope requires a resolvable id, taken from the terminal's context — `pro
 non-`global`/non-`federated` store can't resolve an id, it raises `ValueError` rather
 than writing to the wrong place.
 
+For MCP calls, an absent `CAO_TERMINAL_ID` is explicit operator mode. If the variable is
+present, CAO must verify the terminal metadata before any memory operation; lookup errors,
+HTTP failures, identity mismatches, and malformed metadata fail closed instead of falling
+back to operator permissions. A working-directory lookup failure retains a project-bounded
+caller but leaves project storage unavailable until a cwd can be resolved.
+
 > **Note:** `session` and `agent` scopes are stored *under* the `global` container,
 > nested by their `scope_id`. Only `project` and `federated` get their own top-level
 > directory.
@@ -123,6 +153,12 @@ Type is a classification label — it does not affect storage location (see
 | `feedback` | Corrections, recurring mistakes to avoid |
 | `reference` | Pointers to external resources, docs, links |
 
+Project implementation facts, task status, test results, paths, ports, architecture
+decisions, slices, milestones, and acceptance results must use `project` scope. Temporary
+coordination state belongs in `session`. Global scope is reserved for durable cross-project
+user preferences and universally applicable CAO operating rules. When uncertain, use
+`project`; never widen a project fact to global scope.
+
 ## MCP Tools
 
 Agents use these tools via the `cao-mcp-server` MCP server.
@@ -130,6 +166,11 @@ Agents use these tools via the `cao-mcp-server` MCP server.
 ### `memory_store`
 
 Store or update a memory. If the key already exists, the new content is appended as a timestamped entry (upsert).
+
+Calls made from a verified CAO terminal run with `project` as their maximum write scope.
+They may write project, session, and eligible narrower tiers, but cannot write global.
+Unbound operator/service callers retain global administration semantics; even those callers
+cannot store `memory_type="project"` in global scope.
 
 ```
 memory_store(
@@ -150,9 +191,9 @@ memory_store(
 #### Storing into each scope
 
 The only argument that changes *where* the memory lands is `scope`. `memory_type` is
-carried along as a label and is orthogonal — pass `user`, `feedback`, `reference`, or
-`project` with any scope. Each non-`global` scope needs a piece of the terminal's
-context to resolve its `scope_id`; if it can't, the store raises `ValueError`.
+carried along as a label, subject to the hard rule that `project` type cannot use global
+scope. Each non-`global` scope needs a piece of the terminal's context to resolve its
+`scope_id`; if it can't, the store raises `ValueError`.
 
 ```python
 # global — cross-project. No scope_id needed.
@@ -258,6 +299,20 @@ cao memory delete <key> --scope project --yes
 # Clear all memories for a scope
 cao memory clear --scope session --yes
 
+# Audit legacy invalid global/project topics (read-only)
+cao memory scope-audit
+cao memory scope-audit --format json
+
+# Preview quarantine (default), then explicitly apply one finding
+cao memory quarantine-global-project <key>
+cao memory quarantine-global-project <key> --apply
+
+# Audit derivative provider files for a known project path (dry-run)
+cao memory scrub-provider-files /path/to/project
+
+# Remove only CAO-managed blocks/files
+cao memory scrub-provider-files /path/to/project --apply
+
 # Lint the wiki for orphans, contradictions, stale claims, etc.
 cao memory lint
 cao memory lint --scope project --format json
@@ -315,11 +370,14 @@ parse/validate/secret pipeline and reports without writing.
 CAO injects relevant memories into a new session two ways:
 
 1. **First-message block** — when an agent receives its first message in a session,
-   CAO prepends a `<cao-memory>` block containing relevant memories.
+   CAO prepends a terminal-private `<cao-memory>` block containing `session`,
+   `project`, and valid `global` memories.
 2. **Provider config file** — built-in plugins for Claude Code, Codex, and Kiro CLI
-   write the same block into each provider's per-project config file (e.g.
-   `.claude/CLAUDE.md`) on terminal creation, delimited by `cao-memory` markers so
-   repeated runs overwrite the same section.
+   write a repo-shared block containing only `project` and valid `global` memories
+   into each provider's per-project config file (e.g. `.claude/CLAUDE.md`) on
+   terminal creation, delimited by `cao-memory` markers so repeated runs overwrite
+   the same section. `session` and `agent` memory are hard-excluded because
+   concurrent terminals can read the same file.
 
 The block format:
 
@@ -334,10 +392,12 @@ The block format:
 <original user message>
 ```
 
-Memories are selected in scope precedence order: `session` > `project` > `global`. Each
-scope is independently capped — at most `MEMORY_MAX_PER_SCOPE` (10) entries and
+For first-message injection, memories are selected in scope precedence order:
+`session` > `project` > `global`. Provider files use `project` > `global`. Each scope is
+independently capped — at most `MEMORY_MAX_PER_SCOPE` (10) entries and
 `MEMORY_SCOPE_BUDGET_CHARS` (1000) characters per scope — so one scope cannot monopolize
-the injection budget.
+the injection budget. Project/global duplication across the two channels is intentional;
+it preserves provider-native startup context without exposing terminal-private state.
 
 ## Saving Memories
 

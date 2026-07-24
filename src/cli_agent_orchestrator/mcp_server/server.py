@@ -1359,13 +1359,24 @@ def find_profiles(
 # =============================================================================
 
 
+MEMORY_TERMINAL_CONTEXT_ERROR = (
+    "CAO terminal identity could not be verified; memory operation refused"
+)
+
+
+class MemoryTerminalContextError(RuntimeError):
+    """Raised when a declared CAO terminal cannot be verified safely."""
+
+
 def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
-    """Build terminal context dict from the calling terminal's CAO_TERMINAL_ID."""
+    """Build a verified terminal context, failing closed when an ID is declared."""
     try:
         terminal_id = _current_terminal_id()
-    except ValueError as e:
-        logger.warning(f"Failed to get terminal context for memory tools: {e}")
-        return None
+    except ValueError:
+        # Never reinterpret a malformed declared worker identity as an unbound
+        # operator; memory operations must fail closed.
+        logger.warning("memory_terminal_context_verification_failed")
+        raise MemoryTerminalContextError(MEMORY_TERMINAL_CONTEXT_ERROR)
 
     if not terminal_id:
         return None
@@ -1374,11 +1385,22 @@ def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
         response = requests.get(f"{API_BASE_URL}/terminals/{terminal_id}", timeout=_mcp_timeout())
         response.raise_for_status()
         meta = response.json()
+        if not isinstance(meta, dict):
+            raise ValueError("terminal metadata is not an object")
+        if meta.get("id") != terminal_id:
+            raise ValueError("terminal metadata identity mismatch")
+        for required in ("session_name", "provider"):
+            if not isinstance(meta.get(required), str) or not meta[required].strip():
+                raise ValueError(f"terminal metadata missing {required}")
         ctx: Dict[str, Any] = {
             "terminal_id": meta["id"],
             "session_name": meta["session_name"],
             "provider": meta["provider"],
             "agent_profile": meta.get("agent_profile"),
+            # A verified CAO terminal is a project worker, not an unbounded
+            # operator. MemoryService uses this as the maximum write scope.
+            # Direct callers without CAO_TERMINAL_ID retain operator semantics.
+            "caller_scope": "project",
         }
         # Try to get working directory for project scope resolution
         try:
@@ -1387,13 +1409,25 @@ def _get_terminal_context_from_env() -> Optional[Dict[str, Any]]:
                 timeout=_mcp_timeout(),
             )
             if wd_resp.status_code == 200:
-                ctx["cwd"] = wd_resp.json().get("working_directory")
+                wd_meta = wd_resp.json()
+                cwd = wd_meta.get("working_directory") if isinstance(wd_meta, dict) else None
+                if isinstance(cwd, str) and cwd.strip():
+                    ctx["cwd"] = cwd
+                else:
+                    logger.warning("memory_terminal_working_directory_unavailable")
+            else:
+                logger.warning("memory_terminal_working_directory_unavailable")
         except Exception:
-            pass
+            # Identity remains verified and project-bounded. Without cwd,
+            # project stores fail later at scope-id resolution and global
+            # writes remain denied by caller_scope="project".
+            logger.warning("memory_terminal_working_directory_unavailable")
         return ctx
-    except Exception as e:
-        logger.warning(f"Failed to get terminal context for memory tools: {e}")
-        return None
+    except Exception:
+        # Never reinterpret a declared but unverifiable worker as an unbound
+        # operator. Keep the log and returned error free of response bodies.
+        logger.warning("memory_terminal_context_verification_failed")
+        raise MemoryTerminalContextError(MEMORY_TERMINAL_CONTEXT_ERROR)
 
 
 @mcp.tool()
@@ -1427,6 +1461,10 @@ async def memory_store(
 
     Use this to persist facts, decisions, user preferences, and project conventions
     that should be available across agent sessions.
+
+    Project-specific facts must use project scope. Global scope is reserved for
+    cross-project user preferences and universally applicable operating rules;
+    terminal-bound project workers cannot write it.
     """
     from cli_agent_orchestrator.services.memory_service import MemoryService
 

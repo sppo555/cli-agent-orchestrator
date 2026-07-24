@@ -193,7 +193,7 @@ class TestConfigFilesNotMutated:
             svc.store(
                 content="Test memory for injection",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="test-inject",
                 terminal_context=ctx,
             )

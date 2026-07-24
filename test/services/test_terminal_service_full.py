@@ -23,6 +23,16 @@ from cli_agent_orchestrator.services.terminal_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provider_memory_barrier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These generic terminal tests do not exercise provider-memory preparation."""
+
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.services.terminal_service.PROTECTED_PROVIDER_MEMORY_PLUGINS",
+        {},
+    )
+
+
 class TestCreateTerminal:
     """Tests for create_terminal function."""
 

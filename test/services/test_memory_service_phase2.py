@@ -154,7 +154,7 @@ class TestRecallUsesSqliteQuery:
             svc.store(
                 content="some content",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="api-notes",
                 tags="api,backend",
                 terminal_context=ctx,
@@ -180,7 +180,7 @@ class TestRecallUsesSqliteQuery:
             svc.store(
                 content="project item",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="proj-1",
                 terminal_context=ctx,
             )
@@ -202,7 +202,7 @@ class TestForgetDeletesSqliteRow:
             svc.store(
                 content="to be deleted",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="del-me",
                 terminal_context=ctx,
             )
@@ -237,7 +237,7 @@ class TestTokenEstimateStored:
             svc.store(
                 content=content,
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="tok-test",
                 terminal_context=ctx,
             )
@@ -264,7 +264,7 @@ class TestIndexConsistencyWithSqlite:
             svc.store(
                 content="item one",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="item-one",
                 terminal_context=ctx,
             )
@@ -291,7 +291,7 @@ class TestIndexConsistencyWithSqlite:
             svc.store(
                 content="keep me",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="keeper",
                 terminal_context=ctx,
             )
@@ -300,7 +300,7 @@ class TestIndexConsistencyWithSqlite:
             svc.store(
                 content="remove me",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="goner",
                 terminal_context=ctx,
             )
@@ -321,7 +321,7 @@ class TestIndexConsistencyWithSqlite:
             svc.store(
                 content="normal",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="normal-one",
                 terminal_context=ctx,
             )
@@ -351,7 +351,7 @@ class TestBm25FindsContentMatch:
             svc.store(
                 content="The deployment uses GitHub Actions with OIDC authentication",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="deploy-pipeline",
                 tags="ci,cd",
                 terminal_context=ctx,
@@ -384,7 +384,7 @@ class TestBm25FindsContentMatch:
                 svc.store(
                     content=f"Memory content about topic {i} with unique words like banana{i}",
                     scope="global",
-                    memory_type="project",
+                    memory_type="reference",
                     key=f"perf-test-{i}",
                     terminal_context=ctx,
                 )
@@ -412,7 +412,7 @@ class TestHybridRecallMergesResults:
             svc.store(
                 content="RESTful API design with versioning in the URL path",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="api-design",
                 tags="api",
                 terminal_context=ctx,
@@ -519,7 +519,7 @@ class TestFullSqliteRoundtrip:
             svc.store(
                 content="roundtrip test",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="roundtrip",
                 terminal_context=ctx,
             )
@@ -549,7 +549,7 @@ class TestFullSqliteRoundtrip:
                 svc.store(
                     content=f"concurrent item {i}",
                     scope="global",
-                    memory_type="project",
+                    memory_type="reference",
                     key=f"conc-{i}",
                     terminal_context=ctx,
                 )
@@ -580,7 +580,7 @@ class TestMigrationFreshDb:
             svc.store(
                 content="v1",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="uniq-test",
                 terminal_context=ctx,
             )
@@ -589,7 +589,7 @@ class TestMigrationFreshDb:
             svc.store(
                 content="v2",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="uniq-test",
                 terminal_context=ctx,
             )

@@ -10,6 +10,7 @@ Covers the master enable/disable switch introduced in U5:
     * ``recall()``   → returns ``[]``
     * ``forget()``   → raises ``MemoryDisabledError``
     * ``get_memory_context_for_terminal()``   → returns ``""``
+    * ``get_provider_file_memory_context()``  → returns ``""``
     * ``get_curated_memory_context()``        → returns ``""``
 - **AC3** — Disabled ``store()`` touches neither the filesystem (no wiki
   files, no ``index.md``) nor SQLite (no metadata row).
@@ -185,6 +186,11 @@ class TestMemoryServiceShortCircuits:
         with self._disable():
             assert svc.get_memory_context_for_terminal("term-u5") == ""
 
+    def test_get_provider_file_memory_context_returns_empty_string(self, tmp_path: Path) -> None:
+        svc = _make_svc(tmp_path / "mem", tmp_path / "u5.db")
+        with self._disable():
+            assert svc.get_provider_file_memory_context("term-u5") == ""
+
     def test_get_curated_memory_context_returns_empty_string(self, tmp_path: Path) -> None:
         svc = _make_svc(tmp_path / "mem", tmp_path / "u5.db")
         with self._disable():
@@ -249,7 +255,7 @@ def test_enabled_default_preserves_round_trip(tmp_path: Path) -> None:
             svc.store(
                 content="round-trip body",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key="rt-01",
                 tags="rt",
                 terminal_context=_ctx(),

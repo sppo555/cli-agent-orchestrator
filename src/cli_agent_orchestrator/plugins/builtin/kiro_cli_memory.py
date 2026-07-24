@@ -1,13 +1,15 @@
 """Kiro CLI memory-injection plugin (built-in).
 
-On ``post_create_terminal`` for a ``kiro_cli`` provider, writes the CAO
-memory context to ``<cwd>/.kiro/steering/cao-memory.md``. Kiro CLI natively
-loads every ``*.md`` file under ``.kiro/steering/``, so this file is picked
-up automatically. The plugin owns this file end-to-end and overwrites it
-whole on each run (no in-file markers).
+Before provider initialization for a ``kiro_cli`` terminal, writes the repo-safe
+CAO project/global memory context to ``<cwd>/.kiro/steering/cao-memory.md``.
+Session and agent-private memory are excluded because the file is shared by
+concurrent terminals. Kiro CLI natively loads every ``*.md`` file under
+``.kiro/steering/``, so this file is picked up automatically. The plugin owns
+this file end-to-end and overwrites it whole on each run (no in-file markers).
 
-Observer-only: runs after terminal creation, logs-and-skips on every
-error path rather than crashing ``cao-server``.
+The core terminal lifecycle invokes ``prepare`` as a required security barrier;
+plugin discovery is not part of that guarantee. Path and write failures propagate
+and abort provider startup so stale steering cannot be loaded.
 """
 
 from __future__ import annotations
@@ -18,7 +20,10 @@ from pathlib import Path
 
 from cli_agent_orchestrator.clients.database import get_terminal_metadata
 from cli_agent_orchestrator.clients.tmux import tmux_client
-from cli_agent_orchestrator.plugins import PostCreateTerminalEvent, hook
+from cli_agent_orchestrator.plugins import (
+    PostCreateTerminalEvent,
+    PreInitializeTerminalEvent,
+)
 from cli_agent_orchestrator.plugins.base import CaoPlugin
 from cli_agent_orchestrator.services.memory_service import MemoryService
 
@@ -29,7 +34,7 @@ MEMORY_FILENAME = "cao-memory.md"
 
 
 class KiroCliMemoryPlugin(CaoPlugin):
-    """Inject CAO memory into the per-project Kiro steering directory."""
+    """Inject repo-safe CAO memory into the Kiro steering directory."""
 
     async def setup(self) -> None:
         """Stateless; nothing to configure."""
@@ -37,9 +42,17 @@ class KiroCliMemoryPlugin(CaoPlugin):
     async def teardown(self) -> None:
         """Stateless; nothing to close."""
 
-    @hook("post_create_terminal")
+    async def on_pre_initialize_terminal(self, event: PreInitializeTerminalEvent) -> None:
+        """Backward-compatible direct entry point for pre-start preparation."""
+        if event.provider != "kiro_cli":
+            return
+        working_directory = self._resolve_working_directory(event)
+        if not working_directory:
+            raise RuntimeError(f"kiro_cli_memory: no working directory for {event.terminal_id}")
+        self.prepare(event.terminal_id, working_directory)
+
     async def on_post_create_terminal(self, event: PostCreateTerminalEvent) -> None:
-        """Write <cwd>/.kiro/steering/cao-memory.md with the memory context."""
+        """Backward-compatible observer entry point used by direct callers."""
 
         if event.provider != "kiro_cli":
             return
@@ -62,53 +75,41 @@ class KiroCliMemoryPlugin(CaoPlugin):
             return
 
         try:
-            context_block = MemoryService().get_memory_context_for_terminal(event.terminal_id)
+            self.prepare(event.terminal_id, working_directory)
         except Exception as exc:
             logger.warning(
-                "kiro_cli_memory: memory fetch failed for %s: %s",
-                event.terminal_id,
-                exc,
-            )
-            return
-
-        if not context_block:
-            logger.debug(
-                "kiro_cli_memory: no memory context for %s; skipping write",
-                event.terminal_id,
-            )
-            return
-
-        try:
-            target = self._validated_target_path(working_directory)
-        except ValueError as exc:
-            logger.warning(
-                "kiro_cli_memory: path validation rejected %s: %s",
+                "kiro_cli_memory: preparation failed for %s: %s",
                 working_directory,
-                exc,
-            )
-            return
-
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic temp-file + replace: Kiro loads every *.md under
-            # .kiro/steering/, so a partial file from an interrupted write
-            # would still be picked up (same idiom as utils/skill_injection.py).
-            temp_path = target.with_suffix(target.suffix + ".tmp")
-            try:
-                temp_path.write_text(context_block + "\n", encoding="utf-8")
-                os.replace(temp_path, target)
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
-        except Exception as exc:
-            logger.warning(
-                "kiro_cli_memory: write failed for %s: %s",
-                target,
                 exc,
             )
 
     # ------------------------------------------------------------------
     # helpers
+
+    def prepare(self, terminal_id: str, working_directory: str) -> None:
+        """Synchronize the dedicated steering file, deleting it when empty."""
+        target = self._validated_target_path(working_directory)
+        try:
+            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
+        except Exception:
+            logger.warning("kiro_cli_memory: memory fetch failed; removing managed file")
+            context_block = ""
+
+        if not context_block:
+            target.unlink(missing_ok=True)
+            return
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic temp-file + replace: Kiro loads every *.md under
+        # .kiro/steering/, so a partial file from an interrupted write would
+        # still be picked up.
+        temp_path = target.with_suffix(target.suffix + ".tmp")
+        try:
+            temp_path.write_text(context_block + "\n", encoding="utf-8")
+            os.replace(temp_path, target)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     def _resolve_working_directory(self, event: PostCreateTerminalEvent) -> str | None:
         """Look up the tmux pane's working directory for the terminal."""

@@ -1,12 +1,14 @@
 """Claude Code memory-injection plugin (built-in).
 
-On ``post_create_terminal`` for a ``claude_code`` provider, writes the CAO
-memory context block into ``<cwd>/.claude/CLAUDE.md``, replacing any prior
-block delimited by the cao-memory markers.
+Before provider initialization for a ``claude_code`` terminal, writes the
+repo-safe CAO project/global memory context block into
+``<cwd>/.claude/CLAUDE.md``, replacing any prior block delimited by the
+cao-memory markers. Session and agent-private memory are excluded because the
+file is shared by concurrent terminals.
 
-Observer-only: the plugin runs *after* the terminal is created, so any
-failure is logged and the terminal continues without memory context
-rather than crashing ``cao-server``.
+The core terminal lifecycle invokes ``prepare`` as a required security barrier;
+plugin discovery is not part of that guarantee. Path, marker, and write failures
+propagate and abort provider startup so stale instructions cannot be loaded.
 """
 
 from __future__ import annotations
@@ -17,8 +19,12 @@ from pathlib import Path
 
 from cli_agent_orchestrator.clients.database import get_terminal_metadata
 from cli_agent_orchestrator.clients.tmux import tmux_client
-from cli_agent_orchestrator.plugins import PostCreateTerminalEvent, hook
+from cli_agent_orchestrator.plugins import (
+    PostCreateTerminalEvent,
+    PreInitializeTerminalEvent,
+)
 from cli_agent_orchestrator.plugins.base import CaoPlugin
+from cli_agent_orchestrator.plugins.builtin.memory_markers import strip_managed_blocks
 from cli_agent_orchestrator.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -33,7 +39,7 @@ CLAUDE_DIR = ".claude"
 
 
 class ClaudeCodeMemoryPlugin(CaoPlugin):
-    """Inject CAO memory into the per-project CLAUDE.md on terminal creation."""
+    """Inject repo-safe CAO memory into CLAUDE.md on terminal creation."""
 
     async def setup(self) -> None:
         """Nothing to configure; plugin is stateless."""
@@ -41,9 +47,17 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
     async def teardown(self) -> None:
         """Nothing to close; plugin holds no resources."""
 
-    @hook("post_create_terminal")
+    async def on_pre_initialize_terminal(self, event: PreInitializeTerminalEvent) -> None:
+        """Backward-compatible direct entry point for pre-start preparation."""
+        if event.provider != "claude_code":
+            return
+        working_directory = self._resolve_working_directory(event)
+        if not working_directory:
+            raise RuntimeError(f"claude_code_memory: no working directory for {event.terminal_id}")
+        self.prepare(event.terminal_id, working_directory)
+
     async def on_post_create_terminal(self, event: PostCreateTerminalEvent) -> None:
-        """Write the <cao-memory> block into <cwd>/.claude/CLAUDE.md."""
+        """Backward-compatible observer entry point used by direct callers."""
 
         if event.provider != "claude_code":
             return
@@ -66,43 +80,26 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
             return
 
         try:
-            context_block = MemoryService().get_memory_context_for_terminal(event.terminal_id)
+            self.prepare(event.terminal_id, working_directory)
         except Exception as exc:
             logger.warning(
-                "claude_code_memory: memory fetch failed for %s: %s",
-                event.terminal_id,
-                exc,
-            )
-            return
-
-        if not context_block:
-            logger.debug(
-                "claude_code_memory: no memory context for %s; skipping write",
-                event.terminal_id,
-            )
-            return
-
-        try:
-            target = self._validated_target_path(working_directory)
-        except ValueError as exc:
-            logger.warning(
-                "claude_code_memory: path validation rejected %s: %s",
+                "claude_code_memory: preparation failed for %s: %s",
                 working_directory,
-                exc,
-            )
-            return
-
-        try:
-            self._write_block(target, context_block)
-        except Exception as exc:
-            logger.warning(
-                "claude_code_memory: write failed for %s: %s",
-                target,
                 exc,
             )
 
     # ------------------------------------------------------------------
     # helpers
+
+    def prepare(self, terminal_id: str, working_directory: str) -> None:
+        """Synchronize the managed block, scrubbing stale data on empty/error."""
+        target = self._validated_target_path(working_directory)
+        try:
+            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
+        except Exception:
+            logger.warning("claude_code_memory: memory fetch failed; scrubbing managed block")
+            context_block = ""
+        self._write_block(target, context_block)
 
     def _resolve_working_directory(self, event: PostCreateTerminalEvent) -> str | None:
         """Look up the tmux pane's working directory for the terminal."""
@@ -146,15 +143,20 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
         return target
 
     def _write_block(self, target: Path, context_block: str) -> None:
-        """Write or replace the delimited memory section in CLAUDE.md."""
-
-        target.parent.mkdir(parents=True, exist_ok=True)
+        """Write, replace, or remove the delimited memory section."""
 
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
         stripped = self._strip_existing_block(existing)
 
-        separator = "" if not stripped or stripped.endswith("\n") else "\n"
-        new_content = f"{stripped}{separator}{BEGIN_MARKER}\n{context_block}\n{END_MARKER}\n"
+        if not context_block:
+            if not target.exists() or stripped == existing:
+                return
+            new_content = stripped
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            separator = "" if not stripped or stripped.endswith("\n") else "\n"
+            new_content = f"{stripped}{separator}{BEGIN_MARKER}\n{context_block}\n{END_MARKER}\n"
+
         # Atomic temp-file + replace: an interrupted write must never leave a
         # truncated CLAUDE.md behind (same idiom as utils/skill_injection.py).
         temp_path = target.with_suffix(target.suffix + ".tmp")
@@ -167,30 +169,6 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
 
     @staticmethod
     def _strip_existing_block(content: str) -> str:
-        """Remove any prior cao-memory block so we replace rather than append.
+        """Remove valid blocks and reject malformed marker ownership."""
 
-        Each BEGIN is paired with the END that follows it. A stray BEGIN with
-        no following END (or with another BEGIN before its END) is treated as
-        corruption: only the marker token is removed, never the user content
-        around it. This stops a stale unclosed BEGIN from later pairing with an
-        unrelated block's END and deleting everything in between.
-        """
-
-        while True:
-            begin = content.find(BEGIN_MARKER)
-            if begin == -1:
-                break
-            end = content.find(END_MARKER, begin + len(BEGIN_MARKER))
-            next_begin = content.find(BEGIN_MARKER, begin + len(BEGIN_MARKER))
-            if end == -1 or (next_begin != -1 and next_begin < end):
-                # Stray/unclosed BEGIN: drop only the marker, keep all content.
-                content = content[:begin] + content[begin + len(BEGIN_MARKER) :]
-                continue
-            before = content[:begin].rstrip("\n")
-            after = content[end + len(END_MARKER) :].lstrip("\n")
-            if before and after:
-                content = f"{before}\n{after}"
-            else:
-                content = before or after
-
-        return content
+        return strip_managed_blocks(content, BEGIN_MARKER, END_MARKER)

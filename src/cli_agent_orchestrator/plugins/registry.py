@@ -73,6 +73,16 @@ class PluginRegistry:
                     exc_info=True,
                 )
 
+    async def dispatch_strict(self, event_type: str, event: CaoEvent) -> None:
+        """Dispatch a strict pre-start extension event and propagate failures.
+
+        Unlike observer events, registered pre-start extensions must complete
+        before a provider starts. Core provider-memory safety is handled before
+        this dispatch and does not depend on plugin registration.
+        """
+        for handler in self._dispatch.get(event_type, []):
+            await handler(event)
+
     async def teardown(self) -> None:
         """Call teardown() on every loaded plugin, continuing after failures."""
 

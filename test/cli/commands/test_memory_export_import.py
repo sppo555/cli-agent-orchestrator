@@ -77,7 +77,14 @@ class TestExportCommand:
 
     def test_export_dir_end_to_end_prints_report(self, runner, tmp_path):
         svc = _real_svc(tmp_path)
-        asyncio.run(svc.store(content="cli fact", scope="global", key="cli-topic"))
+        asyncio.run(
+            svc.store(
+                content="cli fact",
+                scope="global",
+                memory_type="reference",
+                key="cli-topic",
+            )
+        )
         dest = tmp_path / "bundle"
         with patch(FACTORY, return_value=svc):
             result = runner.invoke(export_cmd, ["--scope", "global", "-o", str(dest)])
@@ -96,7 +103,14 @@ class TestExportCommand:
 
     def test_tar_gz_output_routes_to_tar_helper(self, runner, tmp_path):
         svc = _real_svc(tmp_path)
-        asyncio.run(svc.store(content="tar fact", scope="global", key="tar-topic"))
+        asyncio.run(
+            svc.store(
+                content="tar fact",
+                scope="global",
+                memory_type="reference",
+                key="tar-topic",
+            )
+        )
         tar_path = tmp_path / "out.tar.gz"
         with patch(FACTORY, return_value=svc):
             result = runner.invoke(export_cmd, ["--scope", "global", "-o", str(tar_path)])

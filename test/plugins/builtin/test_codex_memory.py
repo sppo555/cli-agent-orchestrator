@@ -10,6 +10,9 @@ from cli_agent_orchestrator.plugins.builtin.codex_memory import (
     END_MARKER,
     CodexMemoryPlugin,
 )
+from cli_agent_orchestrator.plugins.builtin.memory_markers import (
+    MalformedMemoryMarkersError,
+)
 
 
 def _event(provider: str = "codex", terminal_id: str = "t1") -> PostCreateTerminalEvent:
@@ -59,7 +62,7 @@ async def test_writes_memory_block_on_post_create_terminal(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>\n## Context\n- stan prefers pytest\n</cao-memory>"
 
     monkeypatch.setattr(
@@ -107,7 +110,7 @@ async def test_replaces_existing_memory_block_on_rerun(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>NEW</cao-memory>"
 
     monkeypatch.setattr(
@@ -146,7 +149,7 @@ async def test_skips_write_when_memory_context_empty(
     )
     monkeypatch.setattr(
         "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
-        lambda: type("F", (), {"get_memory_context_for_terminal": lambda self, t: ""})(),
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, t: ""})(),
     )
 
     plugin = CodexMemoryPlugin()
@@ -154,6 +157,57 @@ async def test_skips_write_when_memory_context_empty(
 
     assert not (tmp_path / "AGENTS.md").exists()
     assert list(tmp_path.iterdir()) == [], "empty context must leave the cwd untouched"
+
+
+@pytest.mark.asyncio
+async def test_empty_context_scrubs_stale_block_and_preserves_user_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    prefix = "# User instructions\nkeep-before\n"
+    suffix = "\nkeep-after\n"
+    target = tmp_path / "AGENTS.md"
+    target.write_text(
+        prefix + f"{BEGIN_MARKER}\nlegacy cross-project memory\n{END_MARKER}" + suffix,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.codex_memory.get_terminal_metadata",
+        lambda _terminal_id: {
+            "tmux_session": "cao-test-session",
+            "tmux_window": "developer-abcd",
+        },
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.codex_memory.tmux_client.get_pane_working_directory",
+        lambda _session, _window: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, _t: ""})(),
+    )
+
+    await CodexMemoryPlugin().on_post_create_terminal(_event())
+
+    assert target.read_text(encoding="utf-8") == prefix + suffix
+
+
+@pytest.mark.asyncio
+async def test_empty_context_leaves_unmanaged_file_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    original = b"# User only\nspacing-is-preserved  \n"
+    target.write_bytes(original)
+    plugin = CodexMemoryPlugin()
+    monkeypatch.setattr(plugin, "_validated_target_path", lambda _working_directory: target)
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.plugins.builtin.codex_memory.MemoryService",
+        lambda: type("F", (), {"get_provider_file_memory_context": lambda self, _t: ""})(),
+    )
+
+    plugin.prepare("t1", str(tmp_path))
+
+    assert target.read_bytes() == original
 
 
 @pytest.mark.asyncio
@@ -212,7 +266,7 @@ async def test_memory_fetch_failure_is_logged_not_raised(
     )
 
     class ExplodingMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             raise RuntimeError("db on fire")
 
     monkeypatch.setattr(
@@ -285,7 +339,7 @@ async def test_path_containment_guard_rejects_escape(
     )
 
     class FakeMemoryService:
-        def get_memory_context_for_terminal(self, terminal_id: str) -> str:
+        def get_provider_file_memory_context(self, terminal_id: str) -> str:
             return "<cao-memory>NEW</cao-memory>"
 
     monkeypatch.setattr(
@@ -349,7 +403,7 @@ async def test_missing_working_dir_does_not_escape_handler(
         lambda: type(
             "F",
             (),
-            {"get_memory_context_for_terminal": lambda self, t: "<cao-memory>X</cao-memory>"},
+            {"get_provider_file_memory_context": lambda self, t: "<cao-memory>X</cao-memory>"},
         )(),
     )
 
@@ -381,10 +435,8 @@ def test_strip_existing_block_removes_multiple_blocks() -> None:
     assert "tail text" in stripped
 
 
-def test_strip_existing_block_preserves_content_around_stray_begin() -> None:
-    """A stray unclosed BEGIN must not pair with a later block's END and delete
-    the user content in between (Copilot finding on #269). Only the stray marker
-    token is removed; surrounding text and the real block survive for re-strip."""
+def test_strip_existing_block_rejects_nested_begin() -> None:
+    """Ambiguous nested ownership must fail closed without returning a rewrite."""
 
     content = (
         "# Agents readme\n"
@@ -394,26 +446,21 @@ def test_strip_existing_block_preserves_content_around_stray_begin() -> None:
         "tail text\n"
     )
 
-    stripped = CodexMemoryPlugin._strip_existing_block(content)
-
-    assert BEGIN_MARKER not in stripped
-    assert END_MARKER not in stripped
-    assert "important user notes" in stripped
-    assert "# Agents readme" in stripped
-    assert "tail text" in stripped
-    assert "real block" not in stripped
+    with pytest.raises(MalformedMemoryMarkersError, match="malformed CAO memory markers"):
+        CodexMemoryPlugin._strip_existing_block(content)
 
 
-def test_strip_existing_block_keeps_content_when_end_missing() -> None:
-    """A BEGIN with no END anywhere drops only the marker, keeping all text."""
+def test_write_block_rejects_unclosed_begin_without_mutation(tmp_path: Path) -> None:
+    """An unclosed BEGIN is preserved byte-for-byte and cannot be rewritten."""
 
     content = f"# Agents readme\n{BEGIN_MARKER}\nuser wrote this\nmore text\n"
+    target = tmp_path / "AGENTS.md"
+    target.write_text(content, encoding="utf-8")
 
-    stripped = CodexMemoryPlugin._strip_existing_block(content)
+    with pytest.raises(MalformedMemoryMarkersError, match="malformed CAO memory markers"):
+        CodexMemoryPlugin()._write_block(target, "")
 
-    assert BEGIN_MARKER not in stripped
-    assert "user wrote this" in stripped
-    assert "more text" in stripped
+    assert target.read_text(encoding="utf-8") == content
 
 
 def test_write_block_is_atomic_no_tmp_left_behind(tmp_path: Path) -> None:
