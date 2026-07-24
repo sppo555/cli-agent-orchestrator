@@ -98,9 +98,7 @@ class TestMemoryTerminalContext:
     def test_malformed_terminal_id_fails_closed_without_lookup(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "supervisor-abc123"}):
             with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
-                with pytest.raises(
-                    MemoryTerminalContextError, match=MEMORY_TERMINAL_CONTEXT_ERROR
-                ):
+                with pytest.raises(MemoryTerminalContextError, match=MEMORY_TERMINAL_CONTEXT_ERROR):
                     _get_terminal_context_from_env()
         mock_get.assert_not_called()
 
