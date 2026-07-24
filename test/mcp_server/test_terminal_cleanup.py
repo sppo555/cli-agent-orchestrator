@@ -3,8 +3,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
-import requests
 import pytest
+import requests
 
 from cli_agent_orchestrator.mcp_server.server import (
     MEMORY_TERMINAL_CONTEXT_ERROR,
