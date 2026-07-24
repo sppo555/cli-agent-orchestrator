@@ -52,6 +52,7 @@ from cli_agent_orchestrator.plugins import (
     PostKillTerminalEvent,
     PostSendMessageEvent,
 )
+from cli_agent_orchestrator.providers.base import IncompleteOutputError
 from cli_agent_orchestrator.providers.manager import provider_manager
 from cli_agent_orchestrator.services.fifo_reader import fifo_manager
 from cli_agent_orchestrator.services.herdr_inbox_registry import get_herdr_inbox_service
@@ -172,6 +173,7 @@ RUNTIME_SKILL_PROMPT_PROVIDERS = {
     ProviderType.CODEX.value,
     ProviderType.KIMI_CLI.value,
     ProviderType.ANTIGRAVITY_CLI.value,
+    ProviderType.GROK_CLI.value,
 }
 
 
@@ -1139,6 +1141,11 @@ def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
     Steps: 200 -> 500 -> 1000 -> 5000.  If no marker is found at 5000 lines,
     the raw tail is returned with a [PARTIAL RESPONSE] prefix so the caller
     knows the output may be incomplete.
+
+    Providers raise ``IncompleteOutputError`` when exposing the current output
+    would leak a still-active partial response. That error is propagated
+    immediately and never converted into the generic no-response/overflow
+    payloads below.
     """
     # Escalation steps used when the provider does not declare extraction_tail_lines.
     _ESCALATION_STEPS = [200, 500, 1000, 5000]
@@ -1184,6 +1191,8 @@ def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
                                 tail_lines=fixed_extract_lines,
                             )
                         return provider.extract_last_message_from_script(full_output)
+                    except IncompleteOutputError:
+                        raise
                     except ValueError as exc:
                         last_err = exc
                         logger.debug(
@@ -1214,6 +1223,8 @@ def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
                             step_lines,
                         )
                     return result
+                except IncompleteOutputError:
+                    raise
                 except ValueError as exc:
                     last_err = exc
                     logger.debug(
@@ -1236,6 +1247,8 @@ def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
                 result = provider.extract_last_message_from_script(full_output)
                 logger.debug("get_output: %s marker found in full_history", terminal_id)
                 return result
+            except IncompleteOutputError:
+                raise
             except ValueError:
                 pass
 

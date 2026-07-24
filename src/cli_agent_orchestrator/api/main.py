@@ -85,6 +85,7 @@ from cli_agent_orchestrator.models.memory import (
 from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
 from cli_agent_orchestrator.models.token_usage import WorkerTokenUsageRecord
 from cli_agent_orchestrator.plugins import PluginRegistry
+from cli_agent_orchestrator.providers.base import IncompleteOutputError
 from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
     SCOPE_READ,
@@ -206,6 +207,22 @@ async def token_usage_spool_daemon() -> None:
         except Exception:
             logger.exception("Token usage spool flush error")
         await asyncio.sleep(15)
+
+
+async def grok_usage_reconcile_daemon() -> None:
+    """Upgrade estimated Grok rows once their native usage flushes late."""
+
+    logger.info("Grok usage reconciliation daemon started")
+    while True:
+        try:
+            from cli_agent_orchestrator.services.grok_usage_reconciliation import (
+                reconcile_pending_grok_usage,
+            )
+
+            await asyncio.to_thread(reconcile_pending_grok_usage)
+        except Exception:
+            logger.exception("Grok usage reconciliation error")
+        await asyncio.sleep(60)
 
 
 # Response Models
@@ -543,6 +560,7 @@ async def lifespan(app: FastAPI):
     await registry.load()
     app.state.plugin_registry = registry
     token_usage_spool_task = asyncio.create_task(token_usage_spool_daemon())
+    grok_usage_reconcile_task = asyncio.create_task(grok_usage_reconcile_daemon())
 
     # Run cleanup in background
     asyncio.create_task(asyncio.to_thread(cleanup_old_data))
@@ -639,6 +657,7 @@ async def lifespan(app: FastAPI):
     # Cancel daemon on shutdown
     daemon_task.cancel()
     token_usage_spool_task.cancel()
+    grok_usage_reconcile_task.cancel()
 
     try:
         await asyncio.gather(
@@ -647,6 +666,7 @@ async def lifespan(app: FastAPI):
             inbox_service_task,
             daemon_task,
             token_usage_spool_task,
+            grok_usage_reconcile_task,
             return_exceptions=True,
         )
     except asyncio.CancelledError:
@@ -1552,6 +1572,7 @@ async def list_providers_endpoint() -> List[Dict]:
         "opencode_cli": "opencode",
         "cursor_cli": "agent",
         "antigravity_cli": "agy",
+        "grok_cli": "grok",
     }
     result = []
     for provider, binary in provider_binaries.items():
@@ -2353,6 +2374,8 @@ async def get_terminal_output(
         # transcript can't stall the whole server.
         output = await asyncio.to_thread(terminal_service.get_output, terminal_id, mode)
         return TerminalOutputResponse(output=output, mode=mode)
+    except IncompleteOutputError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:

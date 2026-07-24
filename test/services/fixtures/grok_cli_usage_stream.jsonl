@@ -1,0 +1,3 @@
+{"type":"thought","data":"checking"}
+{"type":"text","data":"structured answer"}
+{"type":"end","stopReason":"EndTurn","sessionId":"00000000-0000-4000-8000-000000000001","requestId":"00000000-0000-4000-8000-000000000002","usage":{"input_tokens":1636,"cache_read_input_tokens":11136,"output_tokens":24,"reasoning_tokens":19,"total_tokens":12796},"num_turns":1,"modelUsage":{"grok-4.5":{"inputTokens":1636,"outputTokens":24,"cacheReadInputTokens":11136,"modelCalls":1}}}

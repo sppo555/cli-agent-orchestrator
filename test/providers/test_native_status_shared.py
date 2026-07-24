@@ -29,6 +29,7 @@ from cli_agent_orchestrator.providers.claude_code import ClaudeCodeProvider
 from cli_agent_orchestrator.providers.codex import CodexProvider
 from cli_agent_orchestrator.providers.copilot_cli import CopilotCliProvider
 from cli_agent_orchestrator.providers.cursor_cli import CursorCliProvider
+from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
 from cli_agent_orchestrator.providers.hermes import HermesProvider
 from cli_agent_orchestrator.providers.kimi_cli import KimiCliProvider
 from cli_agent_orchestrator.providers.kiro_cli import KiroCliProvider
@@ -50,6 +51,7 @@ PROVIDERS = [
     pytest.param(OpenCodeCliProvider, None, id="opencode_cli"),
     pytest.param(CursorCliProvider, "_turns", id="cursor_cli"),
     pytest.param(AntigravityCliProvider, "_turns", id="antigravity_cli"),
+    pytest.param(GrokCliProvider, "_turns", id="grok_cli"),
     pytest.param(HermesProvider, None, id="hermes"),
     pytest.param(ClaudeCodeProvider, None, id="claude_code"),
 ]

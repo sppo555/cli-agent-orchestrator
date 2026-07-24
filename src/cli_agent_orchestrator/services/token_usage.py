@@ -107,12 +107,15 @@ def persist_worker_token_usage(
     run_id: Optional[str] = None,
     step_id: Optional[str] = None,
     progress: Optional[str] = None,
-) -> None:
+) -> Optional[str]:
     """Persist one completed worker attempt without failing the worker.
 
     SQLite remains the primary store. If it is unavailable, the same
     metadata-only record is durably appended to the token-usage spool for
     replay; prompt, response, and provider transcript data never enter it.
+
+    Returns the stable record id of the persisted attempt (shared by the DB row
+    and any spool replay), or ``None`` when the payload could not be built.
     """
 
     from cli_agent_orchestrator.services.token_usage_spool import (
@@ -132,7 +135,7 @@ def persist_worker_token_usage(
         )
     except Exception as exc:  # noqa: BLE001 — fallback metadata must not break completion
         logger.warning("Failed to build token usage spool payload for worker %s: %s", terminal_id, exc)
-        return
+        return None
 
     try:
         from cli_agent_orchestrator.clients.database import record_worker_token_usage
@@ -158,3 +161,5 @@ def persist_worker_token_usage(
             append_token_usage_spool(payload)
         except Exception as spool_exc:  # noqa: BLE001 — worker completion remains primary
             logger.warning("Failed to spool token usage for worker %s: %s", terminal_id, spool_exc)
+
+    return payload.record_id

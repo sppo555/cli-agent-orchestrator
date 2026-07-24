@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]                12K / 500K
+
+
+     ❯ Ask exactly one clarifying question about the task and then stop; do not answer it or continue.       7:46 PM
+
+
+  ❙  ◆ Thought for 0.0s
+
+     What task should I clarify — the prior CAPTURE_COMPLETED instruction, or a different software           7:47 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    ⠸ Responding… 0.1s                                                                              2.1s ⇣12.3k [stop]
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-approve ─╯
+
+  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts
+

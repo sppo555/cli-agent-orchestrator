@@ -48,7 +48,11 @@ class ProviderUsageInventory:
     privacy_boundary: str
 
 
-_NATIVE_PROVIDERS = {ProviderType.CLAUDE_CODE.value, ProviderType.CODEX.value}
+_NATIVE_PROVIDERS = {
+    ProviderType.CLAUDE_CODE.value,
+    ProviderType.CODEX.value,
+    ProviderType.GROK_CLI.value,
+}
 
 PROVIDER_USAGE_INVENTORY: tuple[ProviderUsageInventory, ...] = tuple(
     ProviderUsageInventory(
@@ -60,7 +64,11 @@ PROVIDER_USAGE_INVENTORY: tuple[ProviderUsageInventory, ...] = tuple(
             else (
                 "Structured JSONL plus the rollout opened by the interactive Codex process."
                 if provider is ProviderType.CODEX
-                else "No native usage source approved."
+                else (
+                    "Process-local headless streaming JSON end event."
+                    if provider is ProviderType.GROK_CLI
+                    else "No native usage source approved."
+                )
             )
         ),
         field_semantics=(
@@ -69,18 +77,30 @@ PROVIDER_USAGE_INVENTORY: tuple[ProviderUsageInventory, ...] = tuple(
             else (
                 "Provider input includes cached input; cumulative turn delta plus output."
                 if provider is ProviderType.CODEX
-                else "Input/output/total/cache/reasoning semantics are unavailable."
+                else (
+                    "Input is uncached plus cache-read; output includes reasoning; total adds input and output."
+                    if provider is ProviderType.GROK_CLI
+                    else "Input/output/total/cache/reasoning semantics are unavailable."
+                )
             )
         ),
         fixture_provenance=(
-            "Sanitized structured fixture plus metadata-only interactive unit fixtures."
-            if provider.value in _NATIVE_PROVIDERS
-            else "No sanitized usage fixture; adapter not approved."
+            "Sanitized Grok 0.2.101 streaming JSON fixture and structured unit tests."
+            if provider is ProviderType.GROK_CLI
+            else (
+                "Sanitized structured fixture plus metadata-only interactive unit fixtures."
+                if provider.value in _NATIVE_PROVIDERS
+                else "No sanitized usage fixture; adapter not approved."
+            )
         ),
         fallback_behavior=(
-            "Omit native interactive records when exact provider evidence is unavailable."
-            if provider.value in _NATIVE_PROVIDERS
-            else "Return None and keep the shared 4-chars-per-token estimate where supported."
+            "Return None and keep the structured worker estimate when end usage is unavailable."
+            if provider is ProviderType.GROK_CLI
+            else (
+                "Omit native interactive records when exact provider evidence is unavailable."
+                if provider.value in _NATIVE_PROVIDERS
+                else "Return None and keep the shared 4-chars-per-token estimate where supported."
+            )
         ),
         privacy_boundary=(
             "Read usage metadata only; never persist prompt, response, transcript, or source path."

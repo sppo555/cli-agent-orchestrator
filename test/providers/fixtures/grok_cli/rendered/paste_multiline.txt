@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]                12K / 500K
+
+
+     ❯ Line one                                                                                              7:50 PM
+       Line two
+       Respond with PASTE_MULTI only.
+
+
+     ◆ Thought for 0.0s
+
+     PASTE_MULTI                                                                                             7:50 PM
+
+     Worked for 2.4s.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-approve ─╯
+
+  Shift+Tab:mode  │  Ctrl+x:shortcuts
+

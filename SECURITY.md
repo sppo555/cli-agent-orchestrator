@@ -148,6 +148,7 @@ CAO translates `allowedTools` into each provider's native restriction mechanism:
 | Kiro CLI | Hard | `allowedTools` in agent JSON (at install time) |
 | Claude Code | Hard | `--disallowedTools` flags block specific tools |
 | Copilot CLI | Hard | `--deny-tool` flags override `--allow-all` |
+| Grok CLI | Hard | `--deny` blocks native tools; `--no-subagents` is added when Bash is denied. V1 is lifecycle-only, so `@cao-mcp-server` orchestration is unavailable. |
 | Kimi CLI | Soft | Security system prompt (no native mechanism) |
 | Codex | Soft | Security system prompt (no native mechanism) |
 

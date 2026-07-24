@@ -6,7 +6,8 @@
   provider-owned session/rollout/conversation metadata. Claude and Codex
   structured adapters remain native; Agy structured/print output has no usage
   payload and retains estimated fallback.
-- Native/provider-reported coverage: 3/10 for assign/interactive; 2/10 for structured
+- Native/provider-reported coverage: 4/10 real providers for assign/interactive;
+  3/10 for structured
 
 ## Evidence boundary
 
@@ -25,7 +26,7 @@ boundary in 4.17.5.
 ## Provider inventory
 
 (The `grok_cli` provider and its native structured token-usage adapter are owned
-by customization 4.18; see that branch's inventory row.)
+by customization 4.18.)
 
 | Provider | Native mode | Usage source | Field semantics | Fixture provenance | Parser failure/fallback | Privacy boundary |
 |---|---|---|---|---|---|---|
@@ -38,6 +39,7 @@ by customization 4.18; see that branch's inventory row.)
 | `hermes` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `cursor_cli` | No | No native source observed | Input/output/total/cache/reasoning unavailable | No sanitized fixture; adapter not approved | Return `None`; retain shared estimate | No prompt/response/transcript capture |
 | `antigravity_cli` | Assign/interactive sessions on Agy 1.1.x launched in CAO's isolated Agy workspace | `gen_metadata` protobuf counters from conversation DBs whose trajectory metadata contains that terminal-specific workspace URI | Snapshot each matching DB's maximum generation index, then sum GenerationMetadata `input_tokens` and `output_tokens` rows created after the marker; total is their sum; inner Claude/Gemini model comes from the worker profile | Sanitized metadata-only protobuf fixtures for Claude Sonnet/Opus and Gemini Pro/Flash plus live Agy 1.1.2 evidence | Shared cwd, missing correlation, schema mismatch, malformed protobuf, SQLite failure, or zero delta returns `None` and retains estimated fallback | Read-only SQLite; inspect the workspace URI only for correlation and decode only wrapper/schema discriminators and input/output integers; never decode or persist prompt, response, steps, tools, artifacts, or source path |
+| `grok_cli` | Assign/interactive and structured headless | Interactive: Grok session `updates.jsonl` bound to a deterministic per-terminal `--session-id`; structured: process-local `--output-format streaming-json` terminal `end` event with a fresh session ID | Interactive: strict positive delta of matching `turn_completed.tokenUsage` counters, with input/output/cache/reasoning provenance preserved; structured: normalized input/output from `end.usage` | Sanitized metadata-only fixtures captured from Grok 0.2.x plus parser, provider, worker, and optional live E2E tests | Missing path, mismatched session/event, malformed counters, or non-positive delta returns `None`; exactly one estimated fallback record is retained | Read only the exact terminal-bound usage file or spawned process stdout; parse usage/model metadata only; never persist prompt, response, tools, or transcript, and never mutate shared Grok/MCP/plugin configuration |
 | `mock_cli` | No; test-only provider | No provider usage source | Synthetic output is never native evidence | Unit-test fixtures only | Retain estimate or omit tracking according to the test seam | Never included in the production provider filter or native-coverage denominator |
 
 ## Contract

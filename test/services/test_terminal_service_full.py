@@ -1,6 +1,7 @@
 """Full tests for terminal service."""
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from cli_agent_orchestrator.models.agent_profile import AgentProfile
 from cli_agent_orchestrator.models.inbox import OrchestrationType
 from cli_agent_orchestrator.models.terminal import TerminalStatus
+from cli_agent_orchestrator.providers.base import IncompleteOutputError
+from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
 from cli_agent_orchestrator.services.terminal_service import (
     OutputMode,
     TerminalInputBlockedError,
@@ -1292,6 +1295,65 @@ class TestGetOutput:
         result = get_output("test1234", OutputMode.LAST)
 
         assert result == "last message"
+
+    @patch("cli_agent_orchestrator.services.terminal_service.provider_manager")
+    @patch("cli_agent_orchestrator.services.terminal_service.status_monitor")
+    @patch("cli_agent_orchestrator.backends.registry._backend")
+    @patch("cli_agent_orchestrator.services.terminal_service.get_terminal_metadata")
+    def test_get_output_last_grok_active_response_raises_without_partial_payload(
+        self, mock_get_metadata, mock_backend, mock_status_monitor, mock_pm
+    ):
+        mock_get_metadata.return_value = {
+            "tmux_session": "cao-session",
+            "tmux_window": "developer-abcd",
+        }
+        fixture = (
+            Path(__file__).parents[1]
+            / "providers"
+            / "fixtures"
+            / "grok_cli"
+            / "raw"
+            / "long_response_completed.ansi"
+        ).read_text()
+        mock_status_monitor.get_buffer.return_value = fixture
+        mock_backend.get_history.return_value = fixture
+        mock_pm.get_provider.return_value = GrokCliProvider(
+            "test1234", "cao-session", "developer-abcd"
+        )
+
+        with pytest.raises(IncompleteOutputError, match="completion boundary"):
+            get_output("test1234", OutputMode.LAST)
+
+        mock_backend.get_history.assert_called_once_with(
+            "cao-session", "developer-abcd", tail_lines=200
+        )
+
+    @patch("cli_agent_orchestrator.services.terminal_service.provider_manager")
+    @patch("cli_agent_orchestrator.services.terminal_service.status_monitor")
+    @patch("cli_agent_orchestrator.backends.registry._backend")
+    @patch("cli_agent_orchestrator.services.terminal_service.get_terminal_metadata")
+    def test_get_output_last_grok_completed_response_succeeds(
+        self, mock_get_metadata, mock_backend, mock_status_monitor, mock_pm
+    ):
+        mock_get_metadata.return_value = {
+            "tmux_session": "cao-session",
+            "tmux_window": "developer-abcd",
+        }
+        fixture = (
+            Path(__file__).parents[1]
+            / "providers"
+            / "fixtures"
+            / "grok_cli"
+            / "raw"
+            / "completed_capture_pane.ansi"
+        ).read_text()
+        mock_status_monitor.get_buffer.return_value = fixture
+        mock_backend.get_history.return_value = fixture
+        mock_pm.get_provider.return_value = GrokCliProvider(
+            "test1234", "cao-session", "developer-abcd"
+        )
+
+        assert get_output("test1234", OutputMode.LAST) == "CAPTURE_COMPLETED"
 
     @patch("cli_agent_orchestrator.services.terminal_service.get_terminal_metadata")
     def test_get_output_not_found(self, mock_get_metadata):

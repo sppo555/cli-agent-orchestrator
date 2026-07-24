@@ -112,15 +112,15 @@ Each registered directory is scanned one level deep — every immediate subfolde
 
 ## How Agents Discover Skills
 
-By default, every installed skill is available to every CAO agent. When an agent is launched, CAO appends a catalog block to the prompt listing each available skill's name and description, along with instructions to use the `load_skill` MCP tool to retrieve full content. The agent then decides when and whether to load each skill based on the task at hand.
+By default, every installed skill is advertised to every CAO agent. When an agent is launched, CAO appends a catalog block to the prompt listing each available skill's name and description. Providers with CAO MCP retrieval also receive instructions to use `load_skill` for the full content. Grok CLI lifecycle V1 receives the catalog through `--rules` but cannot use CAO `load_skill` because Gate C is NO-GO; its catalog is guidance only. See [How Skills Work by Provider](#how-skills-work-by-provider).
 
 ### Scoping the catalog per agent (`skills`)
 
 To advertise only a subset of skills to a given agent, set the `skills` field in its profile frontmatter — a list of skill-name patterns, each an exact name or a case-sensitive [`fnmatch`](https://docs.python.org/3/library/fnmatch.html) glob. Only matching skills appear in that agent's catalog; the rest are simply not advertised to it. A pattern that matches no installed skill is logged as a warning, to catch typos and stale names.
 
-This scopes the injected **catalog** only — it controls what an agent *sees* advertised, not what it can *load*. Skill resolution is unchanged: `load_skill` still resolves any installed skill by name, so this is a prompt-relevance / noise-reduction control, not an access boundary. (If you need a hard per-agent allowlist, that would have to be enforced in the `load_skill` path — out of scope here.)
+This scopes the injected **catalog** only — it controls what an agent *sees* advertised, not what it can *load*. For providers with CAO MCP retrieval, skill resolution is unchanged: `load_skill` still resolves any installed skill by name, so this is a prompt-relevance / noise-reduction control, not an access boundary. Grok CLI lifecycle V1 is the exception: it sees the scoped catalog but has no CAO `load_skill` retrieval. (If you need a hard per-agent allowlist, that would have to be enforced in the `load_skill` path — out of scope here.)
 
-This applies only to the runtime-prompt providers that receive the injected catalog (Claude Code, Codex, Antigravity CLI, Kimi CLI). Providers that deliver skills natively (Kiro CLI, OpenCode, GitHub Copilot CLI) ignore the field.
+This applies only to the runtime-prompt providers that receive the injected catalog (Claude Code, Codex, Antigravity CLI, Kimi CLI, and catalog-only Grok CLI). Providers that deliver skills natively (Kiro CLI, OpenCode, GitHub Copilot CLI) ignore the field.
 
 ```yaml
 ---
@@ -162,14 +162,21 @@ Skills are delivered to agents differently depending on the provider. The table 
 | Codex | Runtime prompt | Every terminal creation | `load_skill` MCP tool |
 | Antigravity CLI | Runtime prompt | Every terminal creation | `load_skill` MCP tool |
 | Kimi CLI | Runtime prompt | Every terminal creation | `load_skill` MCP tool |
+| Grok CLI | Runtime prompt through `--rules` | Every terminal creation | Catalog only in lifecycle V1; CAO `load_skill` is unavailable |
 | Kiro CLI | Native `skill://` resources | Every terminal creation | Kiro progressive loading |
 | Copilot CLI | Baked into `.agent.md` at install | On `cao skills add/remove` | `load_skill` MCP tool |
 
-### Runtime Prompt Providers (Claude Code, Codex, Antigravity CLI, Kimi CLI)
+### Runtime Prompt Providers (Claude Code, Codex, Antigravity CLI, Kimi CLI, Grok CLI)
 
 For these providers, the skill catalog is built fresh each time a terminal is created. The catalog — a list of skill names and descriptions — is appended to the system prompt via the provider's native CLI flags.
 
 The agent retrieves full skill content at runtime by calling the `load_skill` MCP tool, which fetches the skill body from the CAO server.
+
+Grok CLI is the lifecycle-only exception: CAO injects the catalog through
+`--rules`, but Gate C did not establish safe per-terminal MCP identity
+forwarding. Grok therefore cannot use CAO's `load_skill` tool in V1 unless a
+future supported Gate C mechanism is implemented. The catalog is guidance, not
+a claim that full skill retrieval is available.
 
 No action is needed after `cao skills add` or `cao skills remove` — the next terminal created will automatically reflect the current set of installed skills.
 

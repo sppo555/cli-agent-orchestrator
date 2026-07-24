@@ -1,0 +1,11 @@
+Usage: cao session [OPTIONS] COMMAND [ARGS]...
+
+  Manage CAO sessions.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  list    List all active CAO sessions.
+  send    Send a message to a session's conductor (or specific terminal).
+  status  Show status of a session's conductor (or specific terminal).

@@ -29,6 +29,10 @@ from typing import Callable, Optional
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.services import terminal_service
+from cli_agent_orchestrator.services.interactive_token_usage import (
+    begin_grok_usage_capture,
+    complete_grok_usage_capture,
+)
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.terminal_service import OutputMode
 from cli_agent_orchestrator.services.token_usage import (
@@ -398,6 +402,27 @@ async def run_agent_step(
 
     assert terminal_id is not None  # for type-checkers: set in both branches
 
+    # Grok's interactive TUI writes provider-owned cumulative usage to its
+    # bound session file. Snapshot it strictly before send_input; this path
+    # keeps track_token_usage=False below, so agent_step remains the sole
+    # persistence owner and cannot race the status-monitor tracker.
+    grok_usage_marker = None
+    if provider == "grok_cli":
+        try:
+            terminal_metadata = await asyncio.to_thread(terminal_service.get_terminal, terminal_id)
+            grok_usage_marker = await asyncio.to_thread(
+                begin_grok_usage_capture,
+                terminal_id,
+                terminal_metadata["session_name"],
+                terminal_metadata["name"],
+            )
+        except Exception as exc:  # noqa: BLE001 - native evidence is best-effort
+            logger.warning(
+                "run_agent_step: failed to snapshot Grok native usage for %s: %r",
+                terminal_id,
+                exc,
+            )
+
     # Send the prompt. send_input is synchronous tmux I/O (bracketed paste +
     # key sends); run it off the event loop so a slow tmux call cannot freeze
     # the whole server for other requests (same hazard as issue #382, which was
@@ -439,13 +464,25 @@ async def run_agent_step(
 
     model, effort = resolve_worker_configuration(provider, agent)
     progress = resolve_worker_progress(progress, prompt, last_message)
-    # Keep the interactive substrate estimate-only. Native token accounting
-    # belongs to the explicit structured worker mode, whose stdout is a
-    # provider-owned JSON/JSONL contract. Terminal scrollback is deliberately
-    # not a production usage source.
-    usage = estimate_token_usage(
-        prompt, last_message, model=model, effort=effort, progress=progress
-    )
+    usage = None
+    if grok_usage_marker is not None:
+        try:
+            usage = await asyncio.to_thread(
+                complete_grok_usage_capture,
+                grok_usage_marker,
+                agent=agent,
+                progress=progress,
+            )
+        except Exception as exc:  # noqa: BLE001 - native evidence is best-effort
+            logger.warning(
+                "run_agent_step: failed to complete Grok native usage for %s: %r",
+                terminal_id,
+                exc,
+            )
+    if usage is None:
+        usage = estimate_token_usage(
+            prompt, last_message, model=model, effort=effort, progress=progress
+        )
     result = AgentStepResult(
         terminal_id=terminal_id,
         last_message=last_message,

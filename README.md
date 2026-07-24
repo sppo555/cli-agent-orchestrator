@@ -26,6 +26,8 @@ Install:
 - At least one supported provider CLI, authenticated before you launch CAO:
   [Kiro CLI](docs/kiro-cli.md), [Claude Code](docs/claude-code.md),
   [Codex CLI](docs/codex-cli.md), [Antigravity CLI](docs/antigravity-cli.md),
+  [Grok CLI](docs/grok-cli.md) (lifecycle-only; CAO MCP orchestration is not
+  supported),
   [Hermes](docs/hermes.md), [Kimi CLI](docs/kimi-cli.md),
   [GitHub Copilot CLI](docs/copilot-cli.md),
   [OpenCode CLI](docs/opencode-cli.md), or
@@ -120,6 +122,7 @@ provider override while keeping the same sequence.
 - Provider behavior:
   [Kiro CLI](docs/kiro-cli.md), [Claude Code](docs/claude-code.md),
   [Codex CLI](docs/codex-cli.md), [Antigravity CLI](docs/antigravity-cli.md),
+  [Grok CLI](docs/grok-cli.md),
   [Hermes](docs/hermes.md), [Kimi CLI](docs/kimi-cli.md),
   [GitHub Copilot CLI](docs/copilot-cli.md),
   [OpenCode CLI](docs/opencode-cli.md), and

@@ -18,6 +18,7 @@ from cli_agent_orchestrator.api.main import (
     opencode_inbox_delivery_daemon,
 )
 from cli_agent_orchestrator.models.terminal import Terminal
+from cli_agent_orchestrator.providers.base import IncompleteOutputError
 from cli_agent_orchestrator.services.inbox_service import inbox_service
 from cli_agent_orchestrator.utils.skills import SkillNameError
 
@@ -122,7 +123,7 @@ class TestAgentProviders:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 9
+        assert len(data) == 10
         names = [p["name"] for p in data]
         assert "kiro_cli" in names
         assert "claude_code" in names
@@ -133,6 +134,7 @@ class TestAgentProviders:
         assert "opencode_cli" in names
         assert "cursor_cli" in names
         assert "antigravity_cli" in names
+        assert "grok_cli" in names
         for p in data:
             assert p["installed"] is True
 
@@ -179,6 +181,7 @@ class TestAgentProviders:
         assert providers_dict["copilot_cli"]["binary"] == "copilot"
         assert providers_dict["opencode_cli"]["binary"] == "opencode"
         assert providers_dict["antigravity_cli"]["binary"] == "agy"
+        assert providers_dict["grok_cli"]["binary"] == "grok"
 
 
 # ── Skills endpoint ──────────────────────────────────────────────────
@@ -931,6 +934,16 @@ class TestGetTerminalOutput:
 
         assert response.status_code == 404
         assert "Terminal not found" in response.json()["detail"]
+
+    def test_get_output_incomplete_response_returns_conflict(self, client):
+        """Active output is retryable and must not look like a missing terminal."""
+        with patch("cli_agent_orchestrator.api.main.terminal_service") as mock_svc:
+            mock_svc.get_output.side_effect = IncompleteOutputError("still processing")
+
+            response = client.get("/terminals/abcd1234/output?mode=last")
+
+        assert response.status_code == 409
+        assert response.json() == {"detail": "still processing"}
 
     def test_get_output_server_error(self, client):
         """GET /terminals/{id}/output returns 500 on error."""

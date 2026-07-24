@@ -1,0 +1,30 @@
+Usage: cao launch [OPTIONS] [MESSAGE]
+
+  Launch cao session with specified agent profile.
+
+Options:
+  --agents TEXT             Agent profile to launch  [required]
+  --session-name TEXT       Name of the session (default: auto-generated)
+  --headless                Launch in detached mode
+  --provider TEXT           Provider to use (default: profile provider or
+                            kiro_cli)
+  --allowed-tools TEXT      Override allowedTools (CAO format: execute_bash,
+                            fs_read, @cao-mcp-server). Repeatable.
+  --async                   Send message and return immediately without
+                            waiting for completion
+  --auto-approve            Skip confirmation prompt (restrictions still
+                            enforced).
+  --yolo                    [DANGEROUS] Unrestricted tool access AND skip
+                            confirmation prompts. Agent can execute ANY
+                            command including aws, rm, curl.
+  --working-directory TEXT  Working directory for the session (default:
+                            current directory)
+  --memory                  Also launch a context-manager (memory_manager)
+                            terminal for curated memory injection.
+  --env KEY=VALUE           Forward an env var to the supervisor AND every
+                            worker spawned later in the same session.
+                            Repeatable. Values travel in the request body, not
+                            the URL. Blocked prefixes (CLAUDE/CODEX_/__MISE_)
+                            and >=2048-byte values are rejected. See issue
+                            #248.
+  --help                    Show this message and exit.
