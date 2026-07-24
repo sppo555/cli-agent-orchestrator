@@ -64,26 +64,105 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       term.write('\r\n\x1b[33m[Connection closed]\x1b[0m\r\n')
     }
 
-    // Copy selection to clipboard on mouse-up
+    // navigator.clipboard requires a secure context (HTTPS or localhost).
+    // Tailscale/LAN access over plain HTTP has no navigator.clipboard, so fall
+    // back to the legacy execCommand('copy'), which works in insecure contexts.
+    const copyToClipboard = (text: string) => {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => copyViaExecCommand(text))
+      } else {
+        copyViaExecCommand(text)
+      }
+    }
+
+    const copyViaExecCommand = (text: string) => {
+      // Preserve the currently focused element (xterm's helper textarea) so the
+      // terminal keeps receiving keystrokes after the copy. Without restoring
+      // focus, the next Ctrl+C never reaches xterm's key handler.
+      const previouslyFocused = document.activeElement as HTMLElement | null
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      // Position off-screen rather than opacity:0 — some browsers refuse to copy
+      // from a fully transparent element.
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      textarea.style.top = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      textarea.setSelectionRange(0, text.length)
+      try {
+        document.execCommand('copy')
+      } catch {
+        // no-op: nothing more we can do in this browser/context
+      }
+      document.body.removeChild(textarea)
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus()
+      } else {
+        term.focus()
+      }
+    }
+
+    // Auto-copy the selection on mouse-up, but only through the async Clipboard
+    // API. The execCommand fallback steals focus (it must focus a textarea), so
+    // running it on every selection change would break subsequent keystrokes;
+    // over plain HTTP the user copies explicitly with Ctrl+C instead.
     term.onSelectionChange(() => {
       const selection = term.getSelection()
-      if (selection) {
+      if (selection && navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(selection).catch(() => {})
       }
     })
 
-    // Ctrl+Shift+C to copy selection
+    const sendTextInput = (text: string) => {
+      if (text && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data: text }))
+      }
+    }
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text/plain')
+      if (text) {
+        e.preventDefault()
+        e.stopPropagation()
+        sendTextInput(text)
+      }
+    }
+
+    const handleClipboardKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase()
+      if (e.ctrlKey && !e.altKey && key === 'v') {
+        e.stopImmediatePropagation()
+      }
+    }
+
+    el.addEventListener('paste', handlePaste, true)
+    el.addEventListener('keydown', handleClipboardKeyDown, true)
+
+    // Browser clipboard shortcuts. Without this, some agent TUIs receive Ctrl+V
+    // as an application shortcut (for example image paste) instead of text paste.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+      const key = e.key.toLowerCase()
+
+      if (e.ctrlKey && !e.altKey && key === 'c') {
         const selection = term.getSelection()
-        if (selection) navigator.clipboard.writeText(selection).catch(() => {})
+        if (selection) {
+          copyToClipboard(selection)
+          term.clearSelection()
+          return false
+        }
+        return !e.shiftKey
+      }
+
+      if (e.ctrlKey && !e.altKey && key === 'v') {
         return false
       }
+
       return true
     })
 
-    // onData handles ALL input including paste — xterm.js
-    // receives pasted text through the browser's input system
+    // onData handles normal input and xterm.js paste paths.
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input', data }))
@@ -114,6 +193,8 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       cancelAnimationFrame(initialFit)
       clearTimeout(resizeTimer)
       resizeObserver.disconnect()
+      el.removeEventListener('paste', handlePaste, true)
+      el.removeEventListener('keydown', handleClipboardKeyDown, true)
       ws.close()
       term.dispose()
     }
