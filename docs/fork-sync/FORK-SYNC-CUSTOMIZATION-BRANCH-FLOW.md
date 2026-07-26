@@ -264,9 +264,106 @@ Validation: `pytest test/api/test_terminals.py -k WebSocket` (10 passed), provid
 tests (336 passed), `npm --prefix web test` (61 passed), `npm --prefix web run build`
 (passed).
 
-## Current Clean Rebuild (2026-07-12)
+## Current Clean Rebuild (2026-07-26)
 
-The latest clean rebuild was run after fork sync moved `origin/main` from
+Fork sync moved `origin/main` from `2c1270c` to `8ecf9be`. The previous
+integration tip was `3e76c1d`; the fixed integration branch was recreated from
+`8ecf9be` and finished at `d298132`.
+
+Customization branch tips used:
+
+- `custom/4.1-codex-pyte-status` at `ebad9ae`
+- `custom/4.3-claude-effort` at `a1ac2c9`
+- `custom/4.4-agy-workspace-trust` at `e7ad8ad`
+- `custom/4.6-status-turn-boundary` at `cbbc307`
+- `custom/4.7-web-terminal-clipboard` at `48e4b04`
+- `custom/4.11-web-terminal-viewer-isolation` at `2a84875`
+- `custom/4.12-web-terminal-page-scroll` at `68aa03b`
+- `custom/4.13-worker-init-headless-viewer` at `0913361`
+- `custom/4.14-worker-init-status-recovery` at `c50c2c0`
+- `custom/4.17.6-antigravity-native-usage` at `2e1fe22`
+- `custom/4.18-grok-cli-provider` at `bbf199f`
+- `custom/4.19-memory-scope-isolation` at `2b8545f`
+
+Upstream range `2c1270c..8ecf9be`:
+
+- `8ecf9be` `feat(mcp): add an explicit model override to handoff/assign (#501)` —
+  threads a per-call `model` through `mcp_server/server.py` → `api/main.py` →
+  `terminal_service.create_terminal` → each provider's `__init__`, with
+  `MODEL_ID_RE`/`MODEL_ID_MAX_LEN` boundary validation.
+- `d8004ae` `fix(tmux): skip bracketed-paste wrap when the pane is a bare shell (#500)` —
+  `send_keys(force_bracketed_paste=True)` now probes `#{pane_current_command}` against the
+  new `BRACKETED_PASTE_INCOMPATIBLE_SHELLS` set and skips the wrap for a bare shell.
+- `f570de1` `fix(memory): bound graph lint projection (#507)` — adds
+  `settings_service.is_memory_lint_enabled()`, folds that flag into the graph cache key,
+  and puts a 90 s timeout (504) on graph projection.
+- `64cd8da` `feat(skills): add agent profile routing (#486)` — new
+  `skills/cao-agent-routing/SKILL.md` plus startup seeding of newly packaged skills.
+- `9f7c101` `docs: sync provider lists/tables with all 9 registered providers (#490)`.
+- `5efe38f` `fix(assign): prevent deferred-init retry loop from re-pasting into working
+  OpenCode workers (#496)` — adds `supports_direct_status_probe` and
+  `_worker_is_started_direct()` (a live capture-pane probe bypassing the cached status).
+- `3daede2` `feat(herdr): modernize integration for herdr 0.7.x (#502)`.
+
+Overlap classification: **partial-area overlap, behavior-compatible**. Four textual
+conflicts, all resolved as unions except one that needed real judgement:
+
+- `api/main.py` import block (4.11, 4.12, 4.17.6, 4.18): our `TmuxBackend` import and
+  upstream's `seed_default_skills` import land on the same line. Union.
+- `api/main.py` `run_step` body (4.17.6, 4.18): our customization wraps `run_agent_step`
+  in an `if body.execution_mode == "structured"` branch while upstream added
+  `model=body.model` to the original unwrapped call. Resolved by keeping our branch and
+  adding `model=body.model` to the interactive call only —
+  `run_structured_worker_step` has no `model` parameter, so the structured path keeps
+  the provider's own configured model. **A naive union here would have dropped either the
+  structured path or the model override.**
+- `agent_step.py` `create_terminal` kwargs (4.19): `registry=registry` vs `model=model`
+  on adjacent lines. Union; both parameters exist in the merged signature.
+- `docs/tool-restrictions.md` (4.18): our Grok CLI row vs upstream's Cursor CLI row at
+  the same table position. Both rows kept.
+
+Two areas merged **cleanly but overlap functionally** — flagged here because a clean
+merge is not evidence of safety:
+
+- 4.13 ↔ `5efe38f`: upstream's `_worker_is_started_direct()` and our `render_during_init`
+  both act on the deferred-init lifecycle. Covered by the passing terminal/agent-step
+  tests; worth an end-to-end handoff check on the deployment.
+- 4.19 ↔ `f570de1`: the memory graph cache key became a 4-tuple. 4.19 does not touch
+  `graph/`, so scope isolation is unaffected.
+
+`d8004ae` changes message-delivery behavior and no customization branch owns
+`clients/tmux.py`, so it is taken as-is. Because it alters how content reaches a pane,
+verify a real handoff on the CAO-Tailscale deployment after rolling this out.
+
+Validation for this rebuild passed on 2026-07-26:
+
+- full `pytest test/`: `5638 passed, 36 skipped, 1 xfailed`, plus **4 pre-existing
+  upstream failures** that also fail on a pristine `origin/main` checkout
+  (`test_workflow_tools.py::TestWorkflowCancel::test_success_envelope` and three
+  `test_otel_init.py::TestTelemetryEnabledExplicitly` cases — the latter need the
+  optional `[otel]` extra). Not rebuild regressions.
+- `npm --prefix web run build`: passed
+- `npm --prefix web test`: `107 passed` (10 files)
+- `black --check src test`: 4 long-standing offenders (`token_usage.py`,
+  `token_usage_spool.py`, `inbox_service.py`, `test_run_step.py`) — identical on the
+  pre-rebuild tip `3e76c1d`, so not introduced here. `isort --check-only src test`: 3
+  offenders, **fewer** than before the rebuild. Both are outside the narrow file list in
+  the Validation section above; cleaning them belongs on the owning custom branches.
+
+This cycle also performed the documentation move described under **Documentation
+Ownership Rule** above. The archived documents arrived on the rebuilt integration branch
+through the normal `--no-ff` merges — no `git checkout <old-tip> -- <doc>` restore was
+needed, confirming the new arrangement works. Two follow-on cleanups were required:
+`custom/4.17.6` and `custom/4.18` still carried root-level copies (the "integration-only"
+claim in the old warning was already stale), and
+`test/services/test_token_usage_contract.py` hard-coded the root path of
+`CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md`. Both were fixed on their owning branches,
+and `custom/4.17.6` was re-merged into `custom/4.18` to restore the ancestry the two
+branches had before this cycle.
+
+## Previous Clean Rebuild (2026-07-12)
+
+The 2026-07-12 clean rebuild was run after fork sync moved `origin/main` from
 `84d79ff` to `deebf65`. The previous integration tip was `8c7416c`; the fixed
 integration branch was recreated from `deebf65` and finished at `ed7c246`.
 
