@@ -27,8 +27,15 @@ def test_inventory_has_one_schema_complete_row_for_each_provider():
         ProviderType.CLAUDE_CODE.value,
         ProviderType.CODEX.value,
     }
+    # Archived under docs/ (see the Documentation Ownership Rule in
+    # docs/fork-sync/FORK-SYNC-CUSTOMIZATION-BRANCH-FLOW.md); it used to sit
+    # at the repository root.
     document = (
-        Path(__file__).parents[2] / "CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md"
+        Path(__file__).parents[2]
+        / "docs"
+        / "reviews"
+        / "grok-cli-provider"
+        / "CAO-WORKER-TOKEN-USAGE-PROVIDER-INVENTORY.md"
     ).read_text()
     assert all(f"| `{provider.value}` |" in document for provider in ProviderType)
     assert "待确认" not in document
