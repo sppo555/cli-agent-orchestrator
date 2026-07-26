@@ -50,6 +50,7 @@ class ProviderManager:
                     tmux_window,
                     agent_profile,
                     allowed_tools,
+                    model=model,
                 )
             elif provider_type == ProviderType.CLAUDE_CODE.value:
                 provider = ClaudeCodeProvider(
@@ -59,6 +60,7 @@ class ProviderManager:
                     agent_profile,
                     allowed_tools,
                     skill_prompt=skill_prompt,
+                    model=model,
                 )
             elif provider_type == ProviderType.CODEX.value:
                 provider = CodexProvider(
@@ -68,6 +70,7 @@ class ProviderManager:
                     agent_profile,
                     allowed_tools,
                     skill_prompt=skill_prompt,
+                    model=model,
                 )
             elif provider_type == ProviderType.COPILOT_CLI.value:
                 provider = CopilotCliProvider(
@@ -86,6 +89,7 @@ class ProviderManager:
                     agent_profile,
                     allowed_tools,
                     skill_prompt=skill_prompt,
+                    model=model,
                 )
             elif provider_type == ProviderType.OPENCODE_CLI.value:
                 provider = OpenCodeCliProvider(
@@ -104,6 +108,7 @@ class ProviderManager:
                     agent_profile,
                     allowed_tools,
                     skill_prompt=skill_prompt,
+                    model=model,
                 )
             elif provider_type == ProviderType.CURSOR_CLI.value:
                 provider = CursorCliProvider(
