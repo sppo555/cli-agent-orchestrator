@@ -859,7 +859,17 @@ class TestWebSocketGroupedViewerSession:
         viewer_session = new_cmd[new_cmd.index("-s") + 1]
         assert viewer_session != "cao-s"
         assert viewer_session.startswith("caoview_")
-        assert ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"] in run_calls
+        viewer_target = f"{viewer_session}:w"
+        assert ["tmux", "select-window", "-t", viewer_target] in run_calls
+        assert [
+            "tmux",
+            "set-option",
+            "-w",
+            "-t",
+            viewer_target,
+            "window-size",
+            "latest",
+        ] in run_calls
 
         # Wheel handling must be isolated to this viewer session. Changing the
         # global root key table would affect unrelated local tmux clients.

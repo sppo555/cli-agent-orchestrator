@@ -3026,13 +3026,25 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                 check=True,
                 capture_output=True,
             )
+            viewer_target = f"{viewer_session}:{window_name}"
+            # A grouped session starts on the source session's current window,
+            # which may not be the terminal requested by this WebSocket. Select
+            # the requested window before attaching and target its window
+            # option explicitly; otherwise ``window-size latest`` can resize a
+            # supervisor window while the requested worker remains manual and
+            # tmux fills the larger browser viewport with dots.
             subprocess.run(
                 ["tmux", "set-option", "-t", viewer_session, "mouse", "off"],
                 check=False,
                 capture_output=True,
             )
             subprocess.run(
-                ["tmux", "set-option", "-t", viewer_session, "window-size", "latest"],
+                ["tmux", "select-window", "-t", viewer_target],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-w", "-t", viewer_target, "window-size", "latest"],
                 check=False,
                 capture_output=True,
             )
