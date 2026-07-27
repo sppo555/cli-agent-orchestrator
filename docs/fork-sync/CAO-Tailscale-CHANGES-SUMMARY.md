@@ -6,8 +6,8 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 
 - Repo: `/Users/alex/Developer/cli-agent-orchestrator`
 - Integration branch: `cao-tailscale-integration`
-- Base: `origin/main` at `2c1270c` (previous: `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
-- Latest rebuild: 2026-07-24; merge tip before this documentation update was `3943150`, followed by 4.19 compatibility/test merges.
+- Base: `origin/main` at `ccbb816` (previous: `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
+- Latest rebuild: 2026-07-28; owner branches and fixed-name integration were rebuilt on the new base.
 - Local package customizations included here:
   - 4.1 Codex pyte status
   - 4.3 Claude Code `--effort`
@@ -20,7 +20,21 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 - 4.14 worker init status recovery from `UNKNOWN`
 - 4.15 durable worker token usage context, including model, effort, and progress/artifact path
 
-## Latest Sync Notes (2026-07-24)
+## Latest Sync Notes (2026-07-28)
+
+- Upstream range `8ecf9be..ccbb816` contains five commits: assign-test live-server
+  isolation (`86ccf63`), environment-overridable `CAO_HOME_DIR` (`17ca884`), reliable
+  Gemini 3.x Agy submission (`7a61054`), Ops MCP launch model/initial-message forwarding
+  (`724a43e`), and configurable 32 KB status rolling buffer (`ccbb816`).
+- None duplicates the local version-number/token-usage implementation. The rolling-buffer
+  change complements local status guards; model forwarding supplies launch input but does
+  not calculate or display usage/version data.
+- The only integration conflict combined 4.13 render-viewer imports with 4.19 strict memory
+  dispatch/provider-file imports. Both behaviors are retained.
+- Validation passed: 720 package/integration tests (plus 3 skipped and 1 expected failure),
+  Web build, and 107 Web tests.
+
+## Previous Sync Notes (2026-07-24)
 
 - Upstream range `edf61ca..2c1270c` contains five commits: tmux native protected paste (`bf66559`), MCP terminal-ID validation (`77befe8`), pre-push warning suppression (`48181e8`), and two documentation reorganizations (`30dead6`, `2c1270c`).
 - No commit changes or duplicates the local version-number/token-usage functionality. There are no changes to the token-usage owner paths from 4.17.6/4.18.

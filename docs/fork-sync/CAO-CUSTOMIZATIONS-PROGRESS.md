@@ -1,8 +1,8 @@
 # CAO Customizations Progress
 
 > Current clean integration branch: `cao-tailscale-integration` (fixed name — the deployment target that CAO-Tailscale's bootstrap installs; rebuilt onto the latest fork-synced main each cycle, so the name never changes even though the base SHA does).
-> Base: `origin/main` at `2c1270c` (`docs: reconcile historical implementation records (#499)`). Previous bases include `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
-> Latest rebuild: 2026-07-24 after fork sync `edf61ca..2c1270c`; upstream added tmux paste handling, MCP terminal-ID validation, hook and documentation fixes. No upstream commit duplicates the local version/token-usage functionality. MCP identity validation partially overlapped 4.19 and was integrated with its fail-closed memory boundary preserved.
+> Base: `origin/main` at `ccbb816` (`fix(status): make state-detection rolling buffer size configurable, raise default to 32KB (#425)`). Previous bases include `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
+> Latest rebuild: 2026-07-28 after fork sync `8ecf9be..ccbb816`; no upstream commit duplicates the local version-number/token-usage functionality. Shared status, Agy, launch-model, and memory-home areas were reviewed and remain behavior-compatible.
 
 ## Current Decision
 
@@ -33,6 +33,21 @@
 | 4.15 Durable worker token usage context | `custom/4.15-worker-token-usage` | `c428319` | `ec5b396` | Done; merged into integration with `--no-ff` |
 | 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | `12a8af9` | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
 | Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
+
+## 2026-07-28 Sync Record
+
+- `86ccf63` isolates MCP assign tests from a running server by mocking the cleanup-nudge lookup.
+- `17ca884` makes `CAO_HOME_DIR` environment-overridable.
+- `7a61054` makes orchestrated/flow task submission reliable on Gemini 3.x Agy by using a
+  longer paste-settle delay and a single Enter.
+- `724a43e` lets Ops MCP session launch pass the requested model and initial message.
+- `ccbb816` makes the status rolling-buffer size configurable and raises its default to 32 KB.
+- No commit duplicates local version-number/token-usage behavior. `ccbb816` partially shares
+  the status lifecycle area with 4.6/4.14, while `17ca884` shares path configuration with
+  4.19; targeted tests confirm both compositions.
+- Integration conflict: only the known 4.13 render-viewer / 4.19 strict-memory imports in
+  `terminal_service.py`; all required imports were retained.
+- Validation: 720 passed, 3 skipped, 1 xfailed; Web build passed; Web tests 107 passed.
 
 ## 2026-07-24 Sync Record
 

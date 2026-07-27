@@ -2,6 +2,22 @@
 
 Use this flow after GitHub fork sync updates `main`.
 
+## Current Clean Rebuild (2026-07-28)
+
+- Upstream base advanced from `8ecf9be` to `ccbb816` across five commits.
+- No upstream commit duplicates or replaces the local version-number/token-usage
+  functionality.
+- Partial shared-area changes were reviewed: configurable status rolling-buffer size
+  (`ccbb816`) complements 4.6/4.14; Antigravity task submission (`7a61054`) is separate
+  from 4.4 workspace trust; launch model/message forwarding (`724a43e`) does not replace
+  token accounting; and `CAO_HOME_DIR` (`17ca884`) remains compatible with 4.19 memory
+  isolation.
+- All owner branches were merged with the new base. The integration rebuild had one
+  expected 4.13/4.19 import conflict in `terminal_service.py`; the resolution preserves
+  render-viewer hooks, strict plugin dispatch, and provider-memory preparation.
+- Validation: 720 passed, 3 skipped, 1 xfailed in the focused package/integration batch;
+  Web build passed; all 107 Web tests passed.
+
 ## Preferred Flow
 
 1. Fork sync on GitHub updates `main`.
