@@ -6,7 +6,7 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 
 - Repo: `/Users/alex/Developer/cli-agent-orchestrator`
 - Integration branch: `cao-tailscale-integration`
-- Base: `origin/main` at `ccbb816` (previous: `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
+- Base: `origin/main` at `9a56f01` (previous: `ccbb816`, `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`)
 - Latest rebuild: 2026-07-28; owner branches and fixed-name integration were rebuilt on the new base.
 - Local package customizations included here:
   - 4.1 Codex pyte status
@@ -21,6 +21,20 @@ This file records how the package-level CAO customizations relate to the CAO-Tai
 - 4.15 durable worker token usage context, including model, effort, and progress/artifact path
 
 ## Latest Sync Notes (2026-07-28)
+
+- Upstream range `ccbb816..9a56f01` contains one commit implementing an opt-in
+  self-learning loop: outcome reporting and storage, retrospector lessons, guarded
+  instruction promotion, `/outcomes` API, MCP tools, CLI, settings, docs, and tests.
+- It does not change or duplicate the local version-number/token-usage implementation.
+  Token accounting, adapters, spool, query endpoints, and the isolated Web token page are
+  unchanged.
+- Shared-area classification is partial overlap and behavior-compatible. The database
+  resolution keeps both `worker_token_usage` and `workflow_outcomes` migrations; the
+  integration resolution keeps 4.13 render-viewer hooks and 4.19 strict memory setup.
+- Validation passed: 561 core/learning/token tests (plus 3 skipped and 1 expected failure),
+  12 WebSocket tests, 90 conflict-specific tests, Black/isort, Web build, and 107 Web tests.
+
+## Previous Sync Notes (2026-07-28)
 
 - Upstream range `8ecf9be..ccbb816` contains five commits: assign-test live-server
   isolation (`86ccf63`), environment-overridable `CAO_HOME_DIR` (`17ca884`), reliable

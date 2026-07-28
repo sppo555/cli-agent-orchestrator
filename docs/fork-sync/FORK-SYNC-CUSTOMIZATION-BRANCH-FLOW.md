@@ -4,6 +4,22 @@ Use this flow after GitHub fork sync updates `main`.
 
 ## Current Clean Rebuild (2026-07-28)
 
+- Upstream base advanced from `ccbb816` to `9a56f01` in one commit.
+- `9a56f01` adds the opt-in self-learning loop: outcome capture, retrospection,
+  learned-pattern promotion, supporting API/MCP/CLI surfaces, documentation, and tests.
+- It does not duplicate or replace local version-number/token-usage functionality. The
+  token owner paths and Web token page are unchanged.
+- Partial shared-area overlap was reviewed in `api/main.py`, `clients/database.py`,
+  `mcp_server/server.py`, and memory/settings services. The only owner-branch conflict
+  kept both the existing `worker_token_usage` migration and the new `workflow_outcomes`
+  model/index migration. The expected integration import conflict retained render-viewer
+  hooks, strict plugin dispatch, and provider-memory preparation.
+- Validation: 561 passed, 3 skipped, 1 xfailed in the core/learning/token batch; 12
+  WebSocket tests and 90 conflict-specific tests passed; Black/isort and Web build passed;
+  all 107 Web tests passed.
+
+## Previous Clean Rebuild (2026-07-28)
+
 - Upstream base advanced from `8ecf9be` to `ccbb816` across five commits.
 - No upstream commit duplicates or replaces the local version-number/token-usage
   functionality.

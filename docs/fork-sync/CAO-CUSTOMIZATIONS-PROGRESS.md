@@ -1,8 +1,8 @@
 # CAO Customizations Progress
 
 > Current clean integration branch: `cao-tailscale-integration` (fixed name — the deployment target that CAO-Tailscale's bootstrap installs; rebuilt onto the latest fork-synced main each cycle, so the name never changes even though the base SHA does).
-> Base: `origin/main` at `ccbb816` (`fix(status): make state-detection rolling buffer size configurable, raise default to 32KB (#425)`). Previous bases include `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
-> Latest rebuild: 2026-07-28 after fork sync `8ecf9be..ccbb816`; no upstream commit duplicates the local version-number/token-usage functionality. Shared status, Agy, launch-model, and memory-home areas were reviewed and remain behavior-compatible.
+> Base: `origin/main` at `9a56f01` (`feat: opt-in self-learning loop — outcome capture, retrospection, instruction promotion (#514) (#515)`). Previous bases include `ccbb816`, `8ecf9be`, `2c1270c`, `edf61ca`, `deebf65`, `84d79ff`, `29f175c`, `d971298`, `4dc8bf7`, `25422d7`, `b0d313e`, `5dcf319`, `33c593d`, `f369068`, `0214f23`, `462fa2f`.
+> Latest rebuild: 2026-07-28 after fork sync `ccbb816..9a56f01`; the new self-learning feature does not duplicate local version-number/token-usage functionality. API/database/MCP/memory shared areas were reviewed and remain behavior-compatible.
 
 ## Current Decision
 
@@ -34,7 +34,27 @@
 | 4.17.1–4.17.5 Worker token usage successor series | `custom/4.17.5-token-usage-recovery-ux` | `custom/4.17.4-token-usage-native-adapters` | `12a8af9` | Done in owner branch; 4.16 tab superseded, Codex/Claude structured usage enabled, F1/F2 recovery and UX validated; ready for integration review |
 | Integration | `cao-tailscale-integration` | `deebf65` | `ea9320c` | 4.15 merged and documented after 2026-07-12 rebuild |
 
-## 2026-07-28 Sync Record
+## 2026-07-28 Self-Learning Sync Record
+
+- Upstream range: `ccbb816..9a56f01` (one commit).
+- `9a56f01` adds an opt-in self-learning loop: workflow outcome capture, a retrospector
+  agent, durable learned lessons, and guarded promotion into writable agent profiles.
+  It includes `report_outcome`, `list_outcomes`, and `store_lesson` MCP tools;
+  `/outcomes` API routes; `cao memory promote`; learning/promotion settings; a
+  `workflow_outcomes` table; documentation; and extensive tests.
+- No token usage owner path, token API section, or Web token page changed. Classification:
+  no feature duplication; partial shared-area overlap only.
+- 4.17.6 had one `clients/database.py` conflict at the migration hook. Resolution keeps
+  both `_migrate_worker_token_usage()` and `_migrate_workflow_outcome_indexes()`; focused
+  token/outcome tests passed.
+- 4.19 merged cleanly with upstream's new MCP/memory surfaces. The integration rebuild
+  had the expected `terminal_service.py` import conflict and retained render-viewer hooks,
+  strict plugin dispatch, and provider-memory preparation.
+- Validation: core/learning/token batch 561 passed, 3 skipped, 1 xfailed; WebSocket 12
+  passed; conflict-specific terminal/memory/render batch 90 passed; Black/isort and Web
+  build passed; Web tests 107 passed.
+
+## 2026-07-28 Earlier Sync Record
 
 - `86ccf63` isolates MCP assign tests from a running server by mocking the cleanup-nudge lookup.
 - `17ca884` makes `CAO_HOME_DIR` environment-overridable.
