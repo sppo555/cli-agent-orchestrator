@@ -11,6 +11,13 @@ interface TerminalViewProps {
   onClose: () => void
 }
 
+export function copyTerminalSelection(
+  selection: string,
+  copyToClipboard: (text: string) => void,
+) {
+  if (selection) copyToClipboard(selection)
+}
+
 export function TerminalView({ terminalId, provider, agentProfile, onClose }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -104,15 +111,12 @@ export function TerminalView({ terminalId, provider, agentProfile, onClose }: Te
       }
     }
 
-    // Auto-copy the selection on mouse-up, but only through the async Clipboard
-    // API. The execCommand fallback steals focus (it must focus a textarea), so
-    // running it on every selection change would break subsequent keystrokes;
-    // over plain HTTP the user copies explicitly with Ctrl+C instead.
+    // Auto-copy on selection for both secure origins and plain HTTP LAN access.
+    // copyViaExecCommand preserves and restores the xterm helper textarea focus,
+    // so the insecure-origin fallback no longer leaves the terminal unfocused.
     term.onSelectionChange(() => {
       const selection = term.getSelection()
-      if (selection && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(selection).catch(() => {})
-      }
+      copyTerminalSelection(selection, copyToClipboard)
     })
 
     const sendTextInput = (text: string) => {
