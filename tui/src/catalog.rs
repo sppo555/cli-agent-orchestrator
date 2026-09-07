@@ -93,7 +93,7 @@ use std::vec::Vec;
 /// must not offer itself — giving **33 IN-APP / 5 HANDOFF / 23 HIDE = 61**. Recorded here
 /// because a reader comparing the design's 60 against this 61 would otherwise suspect drift.
 /// (#321)
-const COMMAND_COUNT: usize = 76;
+const COMMAND_COUNT: usize = 79;
 
 /// What the TUI does with a command.
 ///
@@ -235,7 +235,10 @@ pub(crate) const DISPLAY_ORDER: [CommandId; COMMAND_COUNT] = [
     CommandId::MemoryRelationshipsList,
     CommandId::MemoryRelationshipsPromote,
     CommandId::MemoryRelationshipsReject,
+    CommandId::MemoryQuarantineGlobalProject,
     CommandId::MemoryRepair,
+    CommandId::MemoryScopeAudit,
+    CommandId::MemoryScrubProviderFiles,
     CommandId::MemoryShow,
     CommandId::ProfileCreate,
     CommandId::ProfileFind,
@@ -375,8 +378,11 @@ pub enum CommandId {
     MemoryRelationshipsPromote,
     /// `cao memory relationships reject`
     MemoryRelationshipsReject,
+    MemoryQuarantineGlobalProject,
     /// `cao memory repair`
     MemoryRepair,
+    MemoryScopeAudit,
+    MemoryScrubProviderFiles,
     /// `cao memory show`
     MemoryShow,
 
@@ -952,6 +958,44 @@ fn entry(id: CommandId) -> Command {
             summary: "Reject a proposal.",
             policy: Policy::Hidden,
             params: &[Param { name: "relationship_id", required: true, kind: ParamKind::Text }],
+            handoff_reason: None,
+        },
+        // 4.19 memory scope-isolation remediation tools. HIDE by default: two of
+        // the three MUTATE stored memory (quarantine, scrub) and none has been
+        // reviewed for in-app use, so they stay CLI-only per the catalog policy.
+        CommandId::MemoryQuarantineGlobalProject => Command {
+            id: CommandId::MemoryQuarantineGlobalProject,
+            parent: Some("memory"),
+            leaf_name: "quarantine-global-project",
+            summary: "Quarantine one legacy global/project topic; dry-run by default.",
+            policy: Policy::Hidden,
+            params: &[
+                Param { name: "key", required: true, kind: ParamKind::Text },
+                Param { name: "--apply", required: false, kind: ParamKind::Flag },
+                Param { name: "--format", required: false, kind: ParamKind::Text },
+            ],
+            handoff_reason: None,
+        },
+        CommandId::MemoryScopeAudit => Command {
+            id: CommandId::MemoryScopeAudit,
+            parent: Some("memory"),
+            leaf_name: "scope-audit",
+            summary: "Report legacy global/project topics without changing runtime memory.",
+            policy: Policy::Hidden,
+            params: &[Param { name: "--format", required: false, kind: ParamKind::Text }],
+            handoff_reason: None,
+        },
+        CommandId::MemoryScrubProviderFiles => Command {
+            id: CommandId::MemoryScrubProviderFiles,
+            parent: Some("memory"),
+            leaf_name: "scrub-provider-files",
+            summary: "Audit or scrub CAO-managed provider instruction copies for PROJECT_DIR.",
+            policy: Policy::Hidden,
+            params: &[
+                Param { name: "project_dir", required: true, kind: ParamKind::Text },
+                Param { name: "--apply", required: false, kind: ParamKind::Flag },
+                Param { name: "--format", required: false, kind: ParamKind::Text },
+            ],
             handoff_reason: None,
         },
         CommandId::MemoryRepair => Command {
