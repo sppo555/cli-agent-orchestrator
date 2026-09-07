@@ -459,7 +459,10 @@ fn route(id: CommandId) -> Option<Route> {
         CommandId::MemoryImport => None,
         CommandId::MemoryLint => None,
         CommandId::MemoryPromote => None,
+        CommandId::MemoryQuarantineGlobalProject => None,
         CommandId::MemoryRepair => None,
+        CommandId::MemoryScopeAudit => None,
+        CommandId::MemoryScrubProviderFiles => None,
 
         // ── `cao profile *` ──────────────────────────────────────────────────────────────
         CommandId::ProfileList => plain(Method::Get, "/agents/profiles"),
