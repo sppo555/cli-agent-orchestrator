@@ -1320,6 +1320,53 @@ async def create_terminal(
                         idempotency_key=idempotency_key,
                         request_fingerprint=request_fingerprint,
                     )
+
+                    # Required provider-instruction security barrier. This core
+                    # preparation deliberately does not depend on the optional
+                    # plugin registry: flow, workflow, agent-step, session, API
+                    # and direct callers must all get the same protection even
+                    # if plugin discovery is absent or failed.
+                    #
+                    # Inside the #498 critical section, deliberately. It used to
+                    # sit after the section, between the lock's release and the
+                    # provider/status registrations that create_terminal also
+                    # performs outside the lock. A concurrent teardown that wins
+                    # the lock in that gap dismantles a terminal whose provider
+                    # is not registered yet, and the create then registers it
+                    # into a torn-down session. This preparation does real work
+                    # -- a backend cwd probe, a memory query, an
+                    # inter-process-locked file rewrite -- so running it there
+                    # widened the gap enough to lose that race deterministically
+                    # (test_teardown_blocked_by_in_flight_create_same_name).
+                    #
+                    # It cannot move LATER instead: malformed markers must abort
+                    # before the provider object is constructed
+                    # (test_malformed_provider_markers_abort_before_provider_
+                    # construction). Here it is earlier than both, and a failure
+                    # is rolled back by the `except` below -- so an aborted
+                    # preparation now leaves neither a tmux session nor a row,
+                    # which is stronger than the outer cleanup it used to get.
+                    #
+                    # The section stays bounded and fully synchronous: it still
+                    # never spans provider.initialize(), which is the constraint
+                    # session_lock.py actually documents.
+                    if provider in PROTECTED_PROVIDER_MEMORY_PLUGINS:
+                        pane_working_directory = get_backend().get_pane_working_directory(
+                            session_name, created_window_name
+                        )
+                        effective_working_directory = (
+                            pane_working_directory
+                            if isinstance(pane_working_directory, str) and pane_working_directory
+                            else working_directory
+                        )
+                        if not effective_working_directory:
+                            raise RuntimeError(
+                                "provider memory preparation has no working directory "
+                                f"for {terminal_id}"
+                            )
+                        prepare_provider_memory_file(
+                            provider, terminal_id, effective_working_directory
+                        )
                 except BaseException:
                     _roll_back_backend_create_locked(
                         session_name,
@@ -1392,25 +1439,6 @@ async def create_terminal(
             # the StatusMonitor buffer empty so wait_for_shell() times out. A bare
             # Enter produces a fresh prompt line that flows through the pipe.
             get_backend().send_special_key(session_name, window_name, "Enter")
-
-        # Required provider-instruction security barrier. This core preparation
-        # deliberately does not depend on the optional plugin registry: flow,
-        # workflow, agent-step, session, API, and direct callers must all get
-        # the same protection even if plugin discovery is absent or failed.
-        if provider in PROTECTED_PROVIDER_MEMORY_PLUGINS:
-            pane_working_directory = get_backend().get_pane_working_directory(
-                session_name, window_name
-            )
-            effective_working_directory = (
-                pane_working_directory
-                if isinstance(pane_working_directory, str) and pane_working_directory
-                else working_directory
-            )
-            if not effective_working_directory:
-                raise RuntimeError(
-                    f"provider memory preparation has no working directory for {terminal_id}"
-                )
-            prepare_provider_memory_file(provider, terminal_id, effective_working_directory)
 
         # Strict pre-initialize hooks remain available to extensions. Built-in
         # provider-memory preparation above is core-owned and cannot disappear
