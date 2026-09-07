@@ -9,16 +9,12 @@ from sqlalchemy import create_engine
 
 from cli_agent_orchestrator.clients.database import Base
 from cli_agent_orchestrator.models.agent_profile import AgentProfile
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    BEGIN_MARKER as CLAUDE_BEGIN,
-)
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    END_MARKER as CLAUDE_END,
-)
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import BEGIN_MARKER as CLAUDE_BEGIN
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import END_MARKER as CLAUDE_END
 from cli_agent_orchestrator.plugins.builtin.codex_memory import BEGIN_MARKER as CODEX_BEGIN
 from cli_agent_orchestrator.plugins.builtin.codex_memory import END_MARKER as CODEX_END
-from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.services import terminal_service
+from cli_agent_orchestrator.services.memory_service import MemoryService
 
 
 async def _seed_scoped_contexts(svc: MemoryService, project_dir: Path) -> dict[str, dict[str, str]]:

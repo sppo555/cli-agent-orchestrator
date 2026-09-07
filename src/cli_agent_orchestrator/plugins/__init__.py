@@ -3,12 +3,12 @@
 from cli_agent_orchestrator.plugins.base import CaoPlugin, hook
 from cli_agent_orchestrator.plugins.events import (
     CaoEvent,
-    PreInitializeTerminalEvent,
     PostCreateSessionEvent,
     PostCreateTerminalEvent,
     PostKillSessionEvent,
     PostKillTerminalEvent,
     PostSendMessageEvent,
+    PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.plugins.registry import PluginRegistry
 

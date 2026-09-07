@@ -3,13 +3,11 @@
 from pathlib import Path
 from typing import Any
 
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import BEGIN_MARKER as CLAUDE_BEGIN
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import END_MARKER as CLAUDE_END
 from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    BEGIN_MARKER as CLAUDE_BEGIN,
+    ClaudeCodeMemoryPlugin,
 )
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    END_MARKER as CLAUDE_END,
-)
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import ClaudeCodeMemoryPlugin
 from cli_agent_orchestrator.plugins.builtin.codex_memory import BEGIN_MARKER as CODEX_BEGIN
 from cli_agent_orchestrator.plugins.builtin.codex_memory import END_MARKER as CODEX_END
 from cli_agent_orchestrator.plugins.builtin.codex_memory import CodexMemoryPlugin

@@ -8,16 +8,16 @@ import pytest
 from cli_agent_orchestrator.models.agent_profile import AgentProfile
 from cli_agent_orchestrator.models.flow import Flow
 from cli_agent_orchestrator.models.terminal import TerminalStatus
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    BEGIN_MARKER as CLAUDE_BEGIN,
-)
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    END_MARKER as CLAUDE_END,
-)
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import BEGIN_MARKER as CLAUDE_BEGIN
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import END_MARKER as CLAUDE_END
 from cli_agent_orchestrator.plugins.builtin.codex_memory import BEGIN_MARKER as CODEX_BEGIN
 from cli_agent_orchestrator.plugins.builtin.codex_memory import END_MARKER as CODEX_END
-from cli_agent_orchestrator.services import agent_step, flow_service, session_service
-from cli_agent_orchestrator.services import terminal_service
+from cli_agent_orchestrator.services import (
+    agent_step,
+    flow_service,
+    session_service,
+    terminal_service,
+)
 
 
 @pytest.mark.asyncio
