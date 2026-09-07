@@ -46,6 +46,11 @@ _STICKY_READY_STATUSES = frozenset(
     }
 )
 
+# After input is sent, stale ready frames from the previous turn can re-render
+# for a few milliseconds before the new turn's PROCESSING frame appears. Mask
+# those ready states, but allow a genuinely fast ready/completed turn once new
+# output has arrived and this grace window has passed.
+_ARMED_READY_GRACE_S = 0.5
 # Stale-PROCESSING self-heal (#558). get_status()'s cheap re-check re-derives from the SAME
 # rolling buffer the FIFO pipeline feeds — and the moment a process goes genuinely idle it also
 # stops emitting output, so that buffer stops changing. If its final content never happened to
@@ -107,6 +112,8 @@ class StatusMonitor:
         # IDLE/COMPLETED would freeze the terminal forever even when the
         # agent is genuinely processing new work.
         self._allow_processing_revert: Dict[str, bool] = {}
+        self._input_sent_at: Dict[str, float] = {}
+        self._input_sent_buffer_len: Dict[str, int] = {}
         # Per-terminal monotonic timestamp of the last stale-PROCESSING capture-pane
         # attempt — the STALE_PROCESSING_CAPTURE_INTERVAL_S rate limit. Absence is None,
         # deliberately NOT 0.0: time.monotonic()'s reference point is arbitrary, so a 0.0
@@ -312,8 +319,16 @@ class StatusMonitor:
         self._last_status[terminal_id] = detected
         if detected == TerminalStatus.PROCESSING:
             self._allow_processing_revert[terminal_id] = False
+            # The new turn's own PROCESSING frame has arrived, so the
+            # stale-ready mask has nothing left to hide: drop the arming
+            # timestamp/length or the NEXT armed turn would compare against
+            # this turn's numbers.
+            self._input_sent_at.pop(terminal_id, None)
+            self._input_sent_buffer_len.pop(terminal_id, None)
         elif detected in _STICKY_READY_STATUSES and last not in _STICKY_READY_STATUSES:
             self._allow_processing_revert[terminal_id] = False
+            self._input_sent_at.pop(terminal_id, None)
+            self._input_sent_buffer_len.pop(terminal_id, None)
 
         return True
 
@@ -568,6 +583,8 @@ class StatusMonitor:
         """
         with self._lock:
             self._allow_processing_revert[terminal_id] = True
+            self._input_sent_at[terminal_id] = time.monotonic()
+            self._input_sent_buffer_len[terminal_id] = len(self._buffers.get(terminal_id, ""))
             # A new turn is starting: whatever ready state a stale-PROCESSING capture saw
             # before this input no longer describes the terminal. Left armed, that candidate
             # could be "confirmed" by a single post-input read and latch ready against the
@@ -623,6 +640,8 @@ class StatusMonitor:
             self._buffer_epochs.pop(terminal_id, None)
             self._last_status.pop(terminal_id, None)
             self._allow_processing_revert.pop(terminal_id, None)
+            self._input_sent_at.pop(terminal_id, None)
+            self._input_sent_buffer_len.pop(terminal_id, None)
             self._screens.pop(terminal_id, None)
             self._bursting.pop(terminal_id, None)
             self._last_stale_capture_check.pop(terminal_id, None)
@@ -645,6 +664,8 @@ class StatusMonitor:
             self._buffers[terminal_id] = ""
             self._last_status.pop(terminal_id, None)
             self._allow_processing_revert.pop(terminal_id, None)
+            self._input_sent_at.pop(terminal_id, None)
+            self._input_sent_buffer_len.pop(terminal_id, None)
             # Drop the rendered screen too so the relaunched CLI mode is
             # detected against a fresh viewport, not the failed attempt's.
             self._screens.pop(terminal_id, None)
@@ -690,6 +711,10 @@ class StatusMonitor:
 
         with self._lock:
             cached = self._last_status.get(terminal_id, TerminalStatus.UNKNOWN)
+            armed = self._allow_processing_revert.get(terminal_id, False)
+            armed_at = self._input_sent_at.get(terminal_id)
+            armed_len = self._input_sent_buffer_len.get(terminal_id, 0)
+            current_len = len(self._buffers.get(terminal_id, ""))
             # When cached status is PROCESSING, the debounced detection may be
             # stuck: TUI providers (kiro-cli) can send escape sequences
             # continuously after becoming idle, preventing the 200ms quiescence
@@ -701,8 +726,43 @@ class StatusMonitor:
             else:
                 buffer = ""
 
+            if armed and cached in _STICKY_READY_STATUSES:
+                has_new_output = current_len > armed_len
+                grace_elapsed = (
+                    armed_at is not None and time.monotonic() - armed_at >= _ARMED_READY_GRACE_S
+                )
+                if has_new_output and grace_elapsed:
+                    buffer = self._buffers.get(terminal_id, "")
+                else:
+                    return TerminalStatus.PROCESSING
+
+        if armed and cached in _STICKY_READY_STATUSES and buffer:
+            fresh = self._detect_current_status(terminal_id, buffer)
+            logger.debug(
+                f"get_status [{terminal_id}]: armed stale-ready mask, "
+                f"cached={cached.value}, fresh={fresh.value}, buffer_len={len(buffer)}"
+            )
+            if fresh == TerminalStatus.PROCESSING:
+                self._apply_detection(terminal_id, fresh)
+                return TerminalStatus.PROCESSING
+            if fresh in _STICKY_READY_STATUSES:
+                with self._lock:
+                    self._last_status[terminal_id] = fresh
+                    self._allow_processing_revert[terminal_id] = False
+                    self._input_sent_at.pop(terminal_id, None)
+                    self._input_sent_buffer_len.pop(terminal_id, None)
+                    # This path writes _last_status directly rather than going
+                    # through _apply_detection_locked, so it must uphold the
+                    # same invariant by hand: a resolved turn voids any
+                    # capture candidate seeded during the previous PROCESSING
+                    # stretch, which would otherwise still be confirmable
+                    # inside its TTL.
+                    self._pending_stale_capture.pop(terminal_id, None)
+                return fresh
+            return TerminalStatus.PROCESSING
+
         if cached == TerminalStatus.PROCESSING and buffer:
-            fresh = self._detect_status(terminal_id, buffer)
+            fresh = self._detect_current_status(terminal_id, buffer)
             logger.debug(
                 f"get_status [{terminal_id}]: cached=PROCESSING, "
                 f"fresh={fresh.value}, buffer_len={len(buffer)}"
@@ -784,6 +844,20 @@ class StatusMonitor:
                         if current_last_status is not None:
                             return current_last_status
         return cached
+
+    def _detect_current_status(self, terminal_id: str, buffer: str) -> TerminalStatus:
+        """Detect current status for synchronous polling callers.
+
+        Prefer the rendered-screen detector for providers that opted into pyte;
+        falling back to raw detection would re-open the Codex raw-stream false
+        COMPLETED class that screen detection exists to avoid.
+        """
+        provider = provider_manager.get_provider(terminal_id)
+        if provider is None:
+            return TerminalStatus.UNKNOWN
+        if CAO_PYTE_STATUS and getattr(provider, "supports_screen_detection", False):
+            return self._detect_screen(terminal_id, provider)
+        return self._detect_status(terminal_id, buffer)
 
     def _fresh_capture_pane_status(
         self, terminal_id: str, generation: int
