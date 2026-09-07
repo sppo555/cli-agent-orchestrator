@@ -518,7 +518,13 @@ def _grok_source_path(
         return None
     session_id = grok_usage_session_id(terminal_id, session_name, window_name)
     encoded_cwd = quote(working_directory, safe="")
-    path = Path.home() / ".grok" / "sessions" / encoded_cwd / session_id / "updates.jsonl"
+    # Upstream's Grok provider gives every CAO terminal a PRIVATE GROK_HOME, so
+    # the session log no longer lives under ~/.grok. Lazy import: grok_cli
+    # imports grok_usage_session_id from this module.
+    from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
+
+    home = GrokCliProvider.managed_home_for_terminal(terminal_id)
+    path = home / "sessions" / encoded_cwd / session_id / "updates.jsonl"
     return path, session_id
 
 

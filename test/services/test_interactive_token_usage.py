@@ -191,11 +191,22 @@ def test_codex_interactive_turn_persists_cumulative_delta(tmp_path):
 def test_grok_interactive_turn_persists_native_delta_without_cache_fold_in(tmp_path):
     home = tmp_path / "home"
     session_id = interactive.grok_usage_session_id("grok-1", "session", "window")
-    log = home / ".grok" / "sessions" / "%2Fworkspace" / session_id / "updates.jsonl"
+    # Upstream's Grok provider gives every CAO terminal a private GROK_HOME, so
+    # the session log lives under that managed home rather than ~/.grok. Pin the
+    # managed root at tmp_path: CAO_HOME_DIR is resolved at import time, so
+    # without this the test would read (and the fixture would be written) under
+    # the developer's real CAO home.
+    from cli_agent_orchestrator.providers.grok_cli import GrokCliProvider
+
+    managed_root = tmp_path / "grok-homes"
+    with patch.object(GrokCliProvider, "_managed_home_root", return_value=managed_root):
+        grok_home = GrokCliProvider.managed_home_for_terminal("grok-1")
+    log = grok_home / "sessions" / "%2Fworkspace" / session_id / "updates.jsonl"
     log.parent.mkdir(parents=True)
     _write(log, _grok_event(session_id, 100, 5))
 
     with (
+        patch.object(GrokCliProvider, "_managed_home_root", return_value=managed_root),
         patch.object(Path, "home", return_value=home),
         patch.object(interactive, "_pane_working_directory", return_value="/workspace"),
     ):

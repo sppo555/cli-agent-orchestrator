@@ -134,8 +134,10 @@ def persist_worker_token_usage(
             progress=progress,
         )
     except Exception as exc:  # noqa: BLE001 — fallback metadata must not break completion
-        logger.warning("Failed to build token usage spool payload for worker %s: %s", terminal_id, exc)
-        return None
+        logger.warning(
+            "Failed to build token usage spool payload for worker %s: %s", terminal_id, exc
+        )
+        return
 
     try:
         from cli_agent_orchestrator.clients.database import record_worker_token_usage

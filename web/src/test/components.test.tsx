@@ -178,5 +178,6 @@ describe('FALLBACK_PROVIDERS', () => {
     const effective = noProviders.length > 0 ? noProviders : FALLBACK_PROVIDERS.map(n => ({ name: n, binary: '', installed: true }))
     const names = effective.map(p => p.name)
     expect(names).toContain('opencode_cli')
+    expect(names).toContain('grok_cli')
   })
 })

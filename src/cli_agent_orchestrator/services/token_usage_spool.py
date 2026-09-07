@@ -8,6 +8,7 @@ replayed in order, and an incomplete tail is retained for the next process.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -19,7 +20,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, Mapping, Optional
 
-import fcntl
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cli_agent_orchestrator.models.token_usage import TokenUsage
@@ -214,15 +214,18 @@ def append_token_usage_spool(payload: TokenUsageSpoolPayload | Mapping[str, Any]
 
 def _quarantine(raw_line: bytes, reason: str) -> None:
     quarantine = _quarantine_path()
-    entry = json.dumps(
-        {
-            "version": SPOOL_VERSION,
-            "reason": reason[:500],
-            "raw_line": raw_line.decode("utf-8", errors="replace").rstrip("\n"),
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8") + b"\n"
+    entry = (
+        json.dumps(
+            {
+                "version": SPOOL_VERSION,
+                "reason": reason[:500],
+                "raw_line": raw_line.decode("utf-8", errors="replace").rstrip("\n"),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
     fd = os.open(str(quarantine), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
         written = os.write(fd, entry)
