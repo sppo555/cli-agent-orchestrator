@@ -2282,6 +2282,7 @@ def send_input(
     registry: PluginRegistry | None = None,
     sender_id: str | None = None,
     orchestration_type: OrchestrationType | None = None,
+    track_token_usage: bool = True,
     frozen_memory: str | None = None,
 ) -> bool:
     """Send input to terminal via tmux paste buffer.
@@ -2353,6 +2354,25 @@ def send_input(
         # Check how many Enter keys the provider needs after paste
         enter_count = provider.paste_enter_count if provider else 1
 
+        # Snapshot provider-owned usage metadata before submission.  This is
+        # the production assign/interactive seam; no prompt or transcript is
+        # persisted by the tracker.
+        from cli_agent_orchestrator.services.interactive_token_usage import (
+            begin_interactive_usage_turn,
+            cancel_interactive_usage_turn,
+        )
+
+        usage_turn_started = False
+        if track_token_usage and metadata.get("provider"):
+            usage_turn_started = begin_interactive_usage_turn(
+                terminal_id=terminal_id,
+                provider=metadata["provider"],
+                agent=metadata.get("agent_profile") or "",
+                session_name=metadata["tmux_session"],
+                window_name=metadata["tmux_window"],
+                prompt=original_message,
+            )
+
         # Arm the StatusMonitor stickiness gate so that the next provider-
         # detected PROCESSING transition is honored (overriding the latched
         # IDLE/COMPLETED). Without this, sticky ready-status would block
@@ -2389,14 +2409,19 @@ def send_input(
         if provider:
             provider.mark_input_received()
 
-        get_backend().send_keys(
-            metadata["tmux_session"],
-            metadata["tmux_window"],
-            message,
-            enter_count=enter_count,
-            force_bracketed_paste=True,
-            submit_delay=provider.paste_submit_delay if provider else 0.3,
-        )
+        try:
+            get_backend().send_keys(
+                metadata["tmux_session"],
+                metadata["tmux_window"],
+                message,
+                enter_count=enter_count,
+                force_bracketed_paste=True,
+                submit_delay=provider.paste_submit_delay if provider else 0.3,
+            )
+        except Exception:
+            if usage_turn_started:
+                cancel_interactive_usage_turn(terminal_id)
+            raise
 
         update_last_active(terminal_id)
         logger.info(f"Sent input to terminal: {terminal_id}")
@@ -2495,7 +2520,7 @@ def exit_terminal_cli(terminal_id: str) -> None:
     if exit_command.startswith(("C-", "M-")):
         send_special_key(terminal_id, exit_command)
     else:
-        send_input(terminal_id, exit_command)
+        send_input(terminal_id, exit_command, track_token_usage=False)
 
 
 def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
@@ -2789,6 +2814,20 @@ def capture_terminal_snapshot(terminal_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.warning(f"Failed to read working directory for {terminal_id}: {e}")
     metadata["live_working_directory"] = live_working_directory
+
+    # A supervisor may delete a worker immediately after receiving its completion
+    # message, before another status edge can flush native usage. Read the
+    # provider-owned log here, in the snapshot phase, while the pane and the
+    # provider correlation data still exist -- dismantle_terminal_runtime below
+    # destroys both. Failure must not block teardown.
+    try:
+        from cli_agent_orchestrator.services.interactive_token_usage import (
+            finalize_interactive_usage_terminal,
+        )
+
+        finalize_interactive_usage_terminal(terminal_id)
+    except Exception as e:
+        logger.warning(f"Failed to finalize native usage for {terminal_id}: {e}")
 
     # Snapshot scrollback + metadata before killing (for debugging/restore)
     try:

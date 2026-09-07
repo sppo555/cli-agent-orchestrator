@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks
 
 from cli_agent_orchestrator.constants import TERMINALS_RUN_STEP_ROUTE
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.services.agent_step import StepExecutionError
 
 _RUN_STEP = "cli_agent_orchestrator.api.main.run_agent_step"
@@ -52,6 +53,7 @@ class TestRunStepEndpoint:
             terminal_id="abc12345",
             last_message="all done",
             status=TerminalStatus.COMPLETED,
+            token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
         )
         with patch(_RUN_STEP, new=AsyncMock(return_value=result)) as m_run:
             resp = client.post(TERMINALS_RUN_STEP_ROUTE, json=_body())
@@ -61,6 +63,15 @@ class TestRunStepEndpoint:
         assert data["terminal_id"] == "abc12345"
         assert data["last_message"] == "all done"
         assert data["status"] == "completed"
+        assert data["token_usage"] == {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "total_tokens": 5,
+            "estimated": True,
+            "model": None,
+            "effort": None,
+            "progress": None,
+        }
         # The handler forwarded the request fields to the substrate.
         kwargs = m_run.await_args.kwargs
         assert kwargs["provider"] == "kiro_cli"
@@ -186,6 +197,39 @@ class TestRunStepEndpoint:
 
         assert resp.status_code == 200
         assert m_run.await_args.kwargs["model"] is None
+
+    def test_structured_mode_is_explicit_and_does_not_call_interactive_substrate(self, client):
+        result = AgentStepResult(
+            terminal_id="abc12345",
+            last_message="structured",
+            status=TerminalStatus.COMPLETED,
+            token_usage=TokenUsage(
+                input_tokens=40, output_tokens=12, total_tokens=52, estimated=False
+            ),
+        )
+        with (
+            patch(
+                "cli_agent_orchestrator.api.main.run_structured_worker_step",
+                new=AsyncMock(return_value=result),
+            ) as structured,
+            patch(_RUN_STEP, new=AsyncMock()) as interactive,
+        ):
+            resp = client.post(
+                TERMINALS_RUN_STEP_ROUTE,
+                json=_body(provider="codex", execution_mode="structured"),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["token_usage"]["estimated"] is False
+        structured.assert_awaited_once()
+        interactive.assert_not_awaited()
+
+    def test_structured_mode_rejects_terminal_lifecycle_fields(self, client):
+        resp = client.post(
+            TERMINALS_RUN_STEP_ROUTE,
+            json=_body(provider="codex", execution_mode="structured", session_name="existing"),
+        )
+        assert resp.status_code == 422
 
     def test_matching_v2_reuse_constraints_are_forwarded(self, client):
         result = AgentStepResult(

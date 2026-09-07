@@ -21,6 +21,16 @@ export default defineConfig({
   build: {
     outDir: '../src/cli_agent_orchestrator/web_ui',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        // `new URL(...).pathname` rather than node:url's fileURLToPath: this
+        // package ships no @types/node, and upstream's workflow-proxy-config
+        // test imports this config, which pulls it into the `src` tsc program
+        // where a `node:url` import does not type-check.
+        index: new URL('./index.html', import.meta.url).pathname,
+        token: new URL('./token.html', import.meta.url).pathname,
+      },
+    },
   },
   test: {
     globals: true,
@@ -38,6 +48,7 @@ export default defineConfig({
       '/settings': { target: 'http://localhost:9889', changeOrigin: true },
       '/flows': { target: 'http://localhost:9889', changeOrigin: true },
       '/memory': { target: 'http://localhost:9889', changeOrigin: true },
+      '/token-usage': { target: 'http://localhost:9889', changeOrigin: true },
       '/graph': { target: 'http://localhost:9889', changeOrigin: true },
       // Workflow run journal (#504 / U8). The events route is content-negotiated
       // SSE, so we signal "do not buffer or cache this response" to any

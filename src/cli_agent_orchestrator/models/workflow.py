@@ -188,6 +188,11 @@ class WorkflowStep(BaseModel):
     provider: str
     agent: str
     prompt: str
+    progress: Optional[str] = Field(
+        default=None,
+        max_length=1024,
+        description="Optional artifact/progress identifier recorded with worker usage",
+    )
     engine: Optional[KiroEngine] = None
     output_schema: Optional[Dict[str, Any]] = None
     # RESERVED — conditional execution (no MVP unit). Validates, never runs.

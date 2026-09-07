@@ -70,6 +70,27 @@ def _patch_terminal_layer(
 
 
 class TestHappyPath:
+    def test_interactive_path_remains_estimate_only(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
+        with (
+            create,
+            send,
+            delete,
+            get_output as m_out,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            m_out.return_value = "the answer"
+            result = asyncio.run(run_agent_step("codex", "developer", "do the task"))
+
+        assert result.token_usage.estimated is True
+        assert result.token_usage.total_tokens == 6
+        assert persist.call_args.kwargs["usage"].estimated is True
+        m_out.assert_called_once_with("abc12345", OutputMode.LAST)
+
     def test_an_empty_frozen_block_is_passed_to_suppress_live_memory(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
         with (
@@ -171,9 +192,13 @@ class TestHappyPath:
         assert result.terminal_id == "abc12345"
         assert result.last_message == "the answer"
         assert result.status == TerminalStatus.COMPLETED
+        assert result.token_usage.input_tokens == 3
+        assert result.token_usage.output_tokens == 3
+        assert result.token_usage.total_tokens == 6
+        assert result.token_usage.estimated is True
         # Canonical sequence: created, prompt sent, output extracted in LAST mode.
         m_create.assert_awaited_once()
-        m_send.assert_called_once_with("abc12345", "do the task")
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
         m_out.assert_called_once_with("abc12345", OutputMode.LAST)
         # Created-here + teardown default -> graceful exit THEN delete.
         m_exit.assert_called_once_with("abc12345")
@@ -218,7 +243,7 @@ class TestHappyPath:
         m_delete.assert_not_called()
         # A reused terminal is owned by the caller — no graceful exit either.
         m_exit.assert_not_called()
-        m_send.assert_called_once_with("reuse99", "x")
+        m_send.assert_called_once_with("reuse99", "x", track_token_usage=False)
 
     @pytest.mark.parametrize("engine", [KiroEngine.V2, "v2"])
     def test_reuse_matching_explicit_v2(self, engine):

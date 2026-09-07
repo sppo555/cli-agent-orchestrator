@@ -35,6 +35,12 @@ from cli_agent_orchestrator.services import frozen_run_memory, terminal_service
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.step_fingerprint import StepCallFields, compute
 from cli_agent_orchestrator.services.terminal_service import OutputMode
+from cli_agent_orchestrator.services.token_usage import (
+    estimate_token_usage,
+    persist_worker_token_usage,
+    resolve_worker_configuration,
+    resolve_worker_progress,
+)
 from cli_agent_orchestrator.utils.terminal import wait_until_status
 
 logger = logging.getLogger(__name__)
@@ -434,6 +440,8 @@ async def run_agent_step(
     allowed_tools: Optional[list[str]] = None,
     registry: Optional[PluginRegistry] = None,
     env_vars: Optional[dict[str, str]] = None,
+    on_terminal_created: Optional[Callable[[str], None]] = None,
+    progress: Optional[str] = None,
     on_step_terminal_ready: Optional[Callable[[str, str], None]] = None,
     cancel_event: Optional[asyncio.Event] = None,
     engine: Optional[KiroEngine | str] = None,
@@ -707,6 +715,15 @@ async def run_agent_step(
     # key sends); run it off the event loop so a slow tmux call cannot freeze
     # the whole server for other requests (same hazard as issue #382, which was
     # only fixed for DELETE /sessions). Any failure raises and propagates.
+    # This seam persists its own estimate below (or callers use the explicit
+    # structured worker). Disable assign/interactive log capture here so one
+    # run-step cannot create both a native and an estimated record.
+    await asyncio.to_thread(
+        terminal_service.send_input,
+        terminal_id,
+        prompt,
+        track_token_usage=False,
+    )
     # issue #583 Bolt 2, ``memory-resolve-once``: hand this run's FROZEN memory block to the terminal
     # so a replayed run sees the memory the ORIGINAL run recorded rather than the store's state today
     # (FR-9). The run id is read from ``env_vars`` rather than taken as a new parameter, because the
@@ -774,10 +791,34 @@ async def run_agent_step(
             await _best_effort_teardown(terminal_id, registry)
         raise
 
+    model, effort = resolve_worker_configuration(provider, agent)
+    progress = resolve_worker_progress(progress, prompt, last_message)
+    # Keep the interactive substrate estimate-only. Native token accounting
+    # belongs to the explicit structured worker mode, whose stdout is a
+    # provider-owned JSON/JSONL contract. Terminal scrollback is deliberately
+    # not a production usage source.
+    usage = estimate_token_usage(
+        prompt, last_message, model=model, effort=effort, progress=progress
+    )
     result = AgentStepResult(
         terminal_id=terminal_id,
         last_message=last_message,
         status=TerminalStatus.COMPLETED,
+        token_usage=usage,
+    )
+
+    # Persist before teardown so the record survives terminal deletion. The
+    # database path is best-effort and must never turn completed work into a
+    # failed worker step.
+    await asyncio.to_thread(
+        persist_worker_token_usage,
+        terminal_id=terminal_id,
+        provider=provider,
+        agent=agent,
+        usage=usage,
+        run_id=(env_vars or {}).get("CAO_WORKFLOW_RUN_ID"),
+        step_id=(env_vars or {}).get("CAO_WORKFLOW_STEP_ID"),
+        progress=progress,
     )
 
     if teardown and created_here:

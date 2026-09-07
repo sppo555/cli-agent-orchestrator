@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from cli_agent_orchestrator.models.kiro_engine import KiroEngine
 from cli_agent_orchestrator.models.provider import ProviderType
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 
 # Terminal ID validation (8 character hex string)
 TerminalId = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{8}$")]
@@ -123,3 +124,7 @@ class AgentStepResult(BaseModel):
     terminal_id: str
     last_message: str
     status: TerminalStatus
+    token_usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        description="Estimated prompt/response token usage for this completed worker step",
+    )

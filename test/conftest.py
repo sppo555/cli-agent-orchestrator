@@ -142,6 +142,14 @@ def _no_llm_compile_in_tests(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_agent_step_usage_persistence():
+    """Never let synthetic agent-step attempts write to the user's live DB."""
+
+    with patch("cli_agent_orchestrator.services.agent_step.persist_worker_token_usage"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_backend_registry():
     """Prevent leaked backend singletons from crossing test boundaries (fixes #522)."""
     from cli_agent_orchestrator.backends import registry

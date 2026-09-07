@@ -1,0 +1,1 @@
+{"method":"turn/completed","params":{"turn":{"id":"turn_123","status":"completed","usage":{"input_tokens":240,"cached_input_tokens":80,"output_tokens":40}}}}

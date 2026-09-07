@@ -65,6 +65,7 @@ from cli_agent_orchestrator.services.step_output_store import (
     _validate_key_part,
     step_output_store,
 )
+from cli_agent_orchestrator.services.token_usage import TokenUsage, add_token_usage
 
 # RE-EXPORT, not a use (issue #583, unit ``workflow-errors``, BR-2/INV-5). ADR-583-9 MOVED
 # these two exceptions to the ``workflow_errors`` leaf so ``workflow_journal`` can import them
@@ -158,6 +159,7 @@ class StepRunState:
     output: Optional[StepOutputRecord] = None
     terminal_id: Optional[str] = None
     error: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
     # In-memory carrier for the step's ``v2`` call fingerprint (issue #583, unit
     # ``settlement-rewire``, BR-2/TD-3). ``run_agent_step`` COMPUTES the value in the one
     # window BR-5 permits — after working-directory resolution, before terminal creation —
@@ -684,9 +686,11 @@ async def _collect_structured_output(record: RunRecord, step: WorkflowStep) -> S
                 "CAO_WORKFLOW_RUN_ID": record.run_id,
                 "CAO_WORKFLOW_STEP_ID": step.id,
             },
+            progress=step.progress,
             cancel_event=record.cancel_event,
         )
         st.terminal_id = result.terminal_id
+        st.token_usage = add_token_usage(st.token_usage, result.token_usage)
         rec = step_output_store.get(record.run_id, step.id)
         if rec is not None and rec.validated:
             st.output = rec
@@ -714,6 +718,7 @@ async def _run_step(record: RunRecord, step: WorkflowStep) -> None:
     record.current_step_id = step.id
     st = record.step_states[step.id]
     st.state = StepState.RUNNING
+    st.token_usage = None
     # Journal write-through (§1): record the step RUNNING + the live current step.
     # Awaited sequentially off the loop (blocking sqlite must not stall the engine).
     await _ajournal(_journal_step, record, step.id)
@@ -760,9 +765,11 @@ async def _run_step(record: RunRecord, step: WorkflowStep) -> None:
                     "CAO_WORKFLOW_RUN_ID": record.run_id,
                     "CAO_WORKFLOW_STEP_ID": step.id,
                 },
+                progress=step.progress,
                 cancel_event=record.cancel_event,
             )
             st.terminal_id = result.terminal_id
+            st.token_usage = add_token_usage(st.token_usage, result.token_usage)
             # U2 emission: a terminal exists for this step (after the id is bound).
             await _journal_event(
                 record,
@@ -932,6 +939,7 @@ def _build_result(record: RunRecord, order: List[WorkflowStep]) -> WorkflowRunRe
                 attempts=st.attempts,
                 output=st.output.output if st.output is not None else None,
                 error=st.error,
+                token_usage=st.token_usage,
             )
         )
     return WorkflowRunResult(
