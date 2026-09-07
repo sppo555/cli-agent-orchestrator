@@ -75,7 +75,7 @@ def test_memories_survive_service_reinstantiation(tmp_path: Path) -> None:
         {
             "key": f"durable-{i:02d}",
             "content": f"durable content {i} — should survive reinstantiation",
-            "memory_type": "project",
+            "memory_type": "reference",
             "tags": f"t{i},durable",
             "scope": "global",
         }
@@ -154,7 +154,7 @@ def _worker_store(
             svc.store(
                 content=f"concurrent content for {key}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=key,
                 tags=f"concurrent,{key}",
                 terminal_context=ctx,
@@ -263,7 +263,7 @@ def test_per_scope_sort_returns_newest_n(tmp_path: Path) -> None:
             svc.store(
                 content=f"sortable body {i:02d}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=f"sort-{i:02d}",
                 tags=f"t{i}",
                 terminal_context=ctx,

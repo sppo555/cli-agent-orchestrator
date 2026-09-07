@@ -66,7 +66,14 @@ class TestExportEndpointGates:
 
 class TestExportEndpointStream:
     def test_returns_valid_tar_with_expected_members(self, client, real_service):
-        asyncio.run(real_service.store(content="api fact", scope="global", key="api-topic"))
+        asyncio.run(
+            real_service.store(
+                content="api fact",
+                scope="global",
+                memory_type="reference",
+                key="api-topic",
+            )
+        )
         with patch(ENABLED_TARGET, return_value=True):
             response = client.get("/memory/export?scope=global")
         assert response.status_code == 200

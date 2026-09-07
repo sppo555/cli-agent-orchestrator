@@ -353,7 +353,14 @@ class TestTimestampPreservation:
         assert aged.created_at == datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
     def test_merge_older_than_latest_clamps(self, svc, backend, bundle):
-        _run(svc.store(content="current entry", scope="global", key="aged"))
+        _run(
+            svc.store(
+                content="current entry",
+                scope="global",
+                memory_type="reference",
+                key="aged",
+            )
+        )
         _write_topic(bundle, "aged", "stale import", fm_extra=f"timestamp: {self.PAST_ISO}\n")
         report = backend.import_bundle(bundle, "global", "merge", False)
         assert report.merged == 1
@@ -363,7 +370,14 @@ class TestTimestampPreservation:
         assert f"_Originally recorded: {self.PAST_ISO}_" in text
 
     def test_dry_run_counts_clamps(self, svc, backend, bundle):
-        _run(svc.store(content="current entry", scope="global", key="aged"))
+        _run(
+            svc.store(
+                content="current entry",
+                scope="global",
+                memory_type="reference",
+                key="aged",
+            )
+        )
         _write_topic(bundle, "aged", "stale import", fm_extra=f"timestamp: {self.PAST_ISO}\n")
         before = _stored_text(svc, "aged")
         report = backend.import_bundle(bundle, "global", "merge", True)
@@ -471,7 +485,14 @@ class TestExportReadPathContainment:
     """U2 carry-forward: tampered index relative_path cannot read outside the wiki dir."""
 
     def test_tampered_relative_path_skipped(self, svc, backend, tmp_path, caplog):
-        _run(svc.store(content="real body", scope="global", key="real-topic"))
+        _run(
+            svc.store(
+                content="real body",
+                scope="global",
+                memory_type="reference",
+                key="real-topic",
+            )
+        )
         # Plant a file OUTSIDE the wiki dir and point the index entry at it.
         outside = svc.base_dir.parent / "outside.md"
         outside.write_text(

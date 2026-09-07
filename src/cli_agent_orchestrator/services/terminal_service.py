@@ -74,6 +74,7 @@ from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PostKillTerminalEvent,
     PostSendMessageEvent,
+    PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.providers.base import OutputExtractionError
 from cli_agent_orchestrator.providers.kiro_capabilities import (
@@ -94,7 +95,14 @@ from cli_agent_orchestrator.services.memory_gateway import (
     remote_memory_url,
 )
 from cli_agent_orchestrator.services.memory_service import MemoryService
-from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
+from cli_agent_orchestrator.services.plugin_dispatch import (
+    dispatch_plugin_event,
+    dispatch_plugin_event_strict,
+)
+from cli_agent_orchestrator.services.provider_memory_files import (
+    PROTECTED_PROVIDER_MEMORY_PLUGINS,
+    prepare_provider_memory_file,
+)
 from cli_agent_orchestrator.services.render_viewer import (
     nudge_unattended_render,
     render_during_init,
@@ -1442,6 +1450,39 @@ async def create_terminal(
             # the StatusMonitor buffer empty so wait_for_shell() times out. A bare
             # Enter produces a fresh prompt line that flows through the pipe.
             get_backend().send_special_key(session_name, window_name, "Enter")
+
+        # Required provider-instruction security barrier. This core preparation
+        # deliberately does not depend on the optional plugin registry: flow,
+        # workflow, agent-step, session, API, and direct callers must all get
+        # the same protection even if plugin discovery is absent or failed.
+        if provider in PROTECTED_PROVIDER_MEMORY_PLUGINS:
+            pane_working_directory = get_backend().get_pane_working_directory(
+                session_name, window_name
+            )
+            effective_working_directory = (
+                pane_working_directory
+                if isinstance(pane_working_directory, str) and pane_working_directory
+                else working_directory
+            )
+            if not effective_working_directory:
+                raise RuntimeError(
+                    f"provider memory preparation has no working directory for {terminal_id}"
+                )
+            prepare_provider_memory_file(provider, terminal_id, effective_working_directory)
+
+        # Strict pre-initialize hooks remain available to extensions. Built-in
+        # provider-memory preparation above is core-owned and cannot disappear
+        # because a registry or matching hook is missing.
+        await dispatch_plugin_event_strict(
+            registry,
+            "pre_initialize_terminal",
+            PreInitializeTerminalEvent(
+                session_id=session_name,
+                terminal_id=terminal_id,
+                agent_name=agent_profile,
+                provider=provider,
+            ),
+        )
 
         # Step 6: Create and initialize the CLI provider
         # This starts the agent (e.g., runs "kiro-cli chat --agent developer").

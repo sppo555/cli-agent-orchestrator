@@ -79,7 +79,7 @@ def test_roundtrip_store_parses_back_all_fields(tmp_path: Path) -> None:
             svc.store(
                 content=f"body content {i}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=key,
                 tags=f"tag{i}",
                 terminal_context=ctx,
@@ -88,7 +88,7 @@ def test_roundtrip_store_parses_back_all_fields(tmp_path: Path) -> None:
         written.append(
             {
                 "key": mem.key,
-                "memory_type": "project",
+                "memory_type": "reference",
                 "tags": f"tag{i}",
                 "relative_path": f"global/{mem.key}.md",
             }
@@ -183,7 +183,7 @@ def test_roundtrip_empty_tags(tmp_path: Path) -> None:
         svc.store(
             content="content with no tags",
             scope="global",
-            memory_type="project",
+            memory_type="reference",
             key="empty-tags-key",
             tags="",
             terminal_context=ctx,
@@ -260,7 +260,7 @@ def test_roundtrip_multiple_scopes_in_one_index(tmp_path: Path) -> None:
                 svc.store(
                     content=f"{scope} body {i}",
                     scope=scope,
-                    memory_type="project",
+                    memory_type="reference" if scope == "global" else "project",
                     key=key,
                     tags=f"{scope}tag",
                     terminal_context=ctx,
@@ -302,7 +302,7 @@ def test_writer_emits_reader_regex_format(tmp_path: Path) -> None:
             svc.store(
                 content="content for drift guard",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=key,
                 tags="csv,tag,list",
                 terminal_context=ctx,
@@ -349,7 +349,7 @@ def test_roundtrip_runs_under_one_second(tmp_path: Path) -> None:
             svc.store(
                 content=f"perf body {i}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=f"perf-{i:03d}",
                 tags=f"t{i}",
                 terminal_context=ctx,

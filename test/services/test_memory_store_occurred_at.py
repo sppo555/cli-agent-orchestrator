@@ -29,7 +29,15 @@ def svc(tmp_path):
     db_path = tmp_path / "test.db"
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
-    return MemoryService(base_dir=tmp_path / "memory", db_engine=engine)
+    service = MemoryService(base_dir=tmp_path / "memory", db_engine=engine)
+    original_store = service.store
+
+    async def store_reference(*args, **kwargs):
+        kwargs.setdefault("memory_type", "reference")
+        return await original_store(*args, **kwargs)
+
+    service.store = store_reference
+    return service
 
 
 def _headings(svc, key):

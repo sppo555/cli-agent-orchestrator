@@ -75,7 +75,7 @@ def test_single_scope_capped_to_max_per_scope(tmp_path: Path) -> None:
             svc.store(
                 content=long_content + f"entry-{i}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=f"glob-{i:03d}",
                 terminal_context=ctx,
             )
@@ -110,7 +110,7 @@ def test_single_scope_bounded_by_scope_char_budget(tmp_path: Path) -> None:
             svc.store(
                 content=long_content + f"entry-{i}",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 key=f"glob-{i:03d}",
                 terminal_context=ctx,
             )
@@ -224,7 +224,7 @@ def test_total_injection_within_overall_budget(tmp_path: Path) -> None:
                 svc.store(
                     content=long_content + f"{scope}-{i}",
                     scope=scope,
-                    memory_type="project",
+                    memory_type="reference" if scope == "global" else "project",
                     key=f"{scope}-{i:02d}",
                     terminal_context=ctx,
                 )

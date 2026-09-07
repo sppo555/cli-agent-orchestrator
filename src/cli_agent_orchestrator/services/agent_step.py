@@ -671,6 +671,7 @@ async def run_agent_step(
             allowed_tools=allowed_tools,
             caller_id=caller_id,
             env_vars=env_vars,
+            registry=registry,
             engine=engine,
             model=model,
             use_worktree=use_worktree,

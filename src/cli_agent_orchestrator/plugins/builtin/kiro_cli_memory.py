@@ -1,41 +1,30 @@
 """Kiro CLI memory-injection plugin (built-in).
 
-On ``post_create_terminal`` for a ``kiro_cli`` provider, writes the CAO
-memory context to ``<cwd>/.kiro/steering/cao-memory.md``. Kiro CLI natively
-loads every ``*.md`` file under ``.kiro/steering/``, so this file is picked
-up automatically. The plugin owns this file end-to-end and overwrites it
-whole on each run (no in-file markers).
+Before provider initialization for a ``kiro_cli`` terminal, writes the repo-safe
+CAO project/global memory context to ``<cwd>/.kiro/steering/cao-memory.md``.
+Session and agent-private memory are excluded because the file is shared by
+concurrent terminals. Kiro CLI natively loads every ``*.md`` file under
+``.kiro/steering/``, so this file is picked up automatically. The plugin owns
+this file end-to-end and overwrites it whole on each run (no in-file markers).
 
-Unlike the Claude Code / Codex plugins, the whole-file overwrite means the
-lost-update race (defect B) does not apply here — there is no
-read-modify-write cycle to serialize, only a full replace. But the target
-path is fixed *per working directory* (``<cwd>/.kiro/steering/cao-memory.md``),
-so two terminals sharing a cwd still write the same file, and the old
-fixed ``.tmp`` idiom is still exposed to defect A (one writer's
-``finally``-unlink deleting the other's live temp file → ``FileNotFoundError``,
-or a half-written temp being published). ``locked_atomic_rewrite`` closes
-that hole too: it uses a unique per-call temp file and an inter-process
-lock, so concurrent overwrites are safe even though the content itself does
-not depend on the prior file state.
-
-Observer-only: runs after terminal creation, logs-and-skips on every
-error path rather than crashing ``cao-server``.
+The core terminal lifecycle invokes ``prepare`` as a required security barrier;
+plugin discovery is not part of that guarantee. Path and write failures propagate
+and abort provider startup so stale steering cannot be loaded.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 
 from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.clients.database import get_terminal_metadata
-from cli_agent_orchestrator.plugins import PostCreateTerminalEvent, hook
-from cli_agent_orchestrator.plugins.base import CaoPlugin
-from cli_agent_orchestrator.services.memory_gateway import (
-    memory_context_for_terminal,
-    remote_memory_url,
+from cli_agent_orchestrator.plugins import (
+    PostCreateTerminalEvent,
+    PreInitializeTerminalEvent,
 )
+from cli_agent_orchestrator.plugins.base import CaoPlugin
+from cli_agent_orchestrator.services.memory_gateway import remote_memory_url
 from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.utils.atomic_file import locked_atomic_rewrite
 
@@ -46,7 +35,7 @@ MEMORY_FILENAME = "cao-memory.md"
 
 
 class KiroCliMemoryPlugin(CaoPlugin):
-    """Inject CAO memory into the per-project Kiro steering directory."""
+    """Inject repo-safe CAO memory into the Kiro steering directory."""
 
     async def setup(self) -> None:
         """Stateless; nothing to configure."""
@@ -54,9 +43,17 @@ class KiroCliMemoryPlugin(CaoPlugin):
     async def teardown(self) -> None:
         """Stateless; nothing to close."""
 
-    @hook("post_create_terminal")
+    async def on_pre_initialize_terminal(self, event: PreInitializeTerminalEvent) -> None:
+        """Backward-compatible direct entry point for pre-start preparation."""
+        if event.provider != "kiro_cli":
+            return
+        working_directory = self._resolve_working_directory(event)
+        if not working_directory:
+            raise RuntimeError(f"kiro_cli_memory: no working directory for {event.terminal_id}")
+        self.prepare(event.terminal_id, working_directory)
+
     async def on_post_create_terminal(self, event: PostCreateTerminalEvent) -> None:
-        """Write <cwd>/.kiro/steering/cao-memory.md with the memory context."""
+        """Backward-compatible observer entry point used by direct callers."""
 
         if event.provider != "kiro_cli":
             return
@@ -79,63 +76,60 @@ class KiroCliMemoryPlugin(CaoPlugin):
             return
 
         try:
-            if remote_memory_url():
-                context_block = await asyncio.to_thread(
-                    memory_context_for_terminal,
-                    event.terminal_id,
-                )
-            else:
-                context_block = MemoryService().get_memory_context_for_terminal(event.terminal_id)
+            self.prepare(event.terminal_id, working_directory)
         except Exception as exc:
             logger.warning(
-                "kiro_cli_memory: memory fetch failed for %s: %s",
-                event.terminal_id,
-                exc,
-            )
-            return
-
-        if not context_block:
-            logger.debug(
-                "kiro_cli_memory: no memory context for %s; skipping write",
-                event.terminal_id,
-            )
-            return
-
-        try:
-            target = self._validated_target_path(working_directory)
-        except ValueError as exc:
-            logger.warning(
-                "kiro_cli_memory: path validation rejected %s: %s",
+                "kiro_cli_memory: preparation failed for %s: %s",
                 working_directory,
-                exc,
-            )
-            return
-
-        try:
-            # Whole-file overwrite (no read-modify-write), but routed through
-            # the shared locked-atomic helper so concurrent writers sharing a
-            # cwd cannot collide on the temp file (defect A). The compute
-            # callback ignores the existing content by design: this plugin
-            # owns the file end-to-end.
-            #
-            # locked_atomic_rewrite polls with time.sleep up to the lock
-            # timeout; run it off the event loop so a contended lock cannot
-            # stall cao-server for other terminals.
-            await asyncio.to_thread(
-                locked_atomic_rewrite, target, lambda _existing: context_block + "\n"
-            )
-        except Exception as exc:
-            logger.warning(
-                "kiro_cli_memory: write failed for %s: %s",
-                target,
                 exc,
             )
 
     # ------------------------------------------------------------------
     # helpers
 
+    def prepare(self, terminal_id: str, working_directory: str) -> None:
+        """Synchronize the dedicated steering file, deleting it when empty."""
+        target = self._validated_target_path(working_directory)
+        try:
+            context_block = self._repo_safe_context(terminal_id)
+        except Exception:
+            logger.warning("kiro_cli_memory: memory fetch failed; removing managed file")
+            context_block = ""
+
+        if not context_block:
+            target.unlink(missing_ok=True)
+            return
+
+        # Kiro loads every *.md under .kiro/steering/, so a partial file from
+        # an interrupted write would still be picked up. The temp-file idiom
+        # was not enough under concurrency: two terminals preparing the same
+        # repo could have one's finally-unlink delete the other's live temp
+        # file (FileNotFoundError), or publish a half-written one.
+        # locked_atomic_rewrite serializes the whole cycle across processes
+        # and creates the parent directory itself.
+        locked_atomic_rewrite(target, lambda _existing: context_block + "\n")
+
+    @staticmethod
+    def _repo_safe_context(terminal_id: str) -> str:
+        """Project + global memory only — never session or agent-private.
+
+        The remote gateway's ``memory_context_for_terminal`` takes no scope
+        argument, so it cannot honour that restriction. A provider-native file
+        is shared by every terminal working in the repository, so feeding it an
+        unscoped remote context would publish one terminal's session and
+        agent-private memory to all the others — the exact leak this channel's
+        scope filter exists to prevent. Fail closed: refuse, and let ``prepare``
+        scrub the managed block rather than leave a stale one behind.
+        """
+        if remote_memory_url():
+            raise RuntimeError(
+                "remote memory backend cannot scope the provider-file channel to "
+                "project+global; refusing to write repo-shared memory"
+            )
+        return MemoryService().get_provider_file_memory_context(terminal_id)
+
     def _resolve_working_directory(self, event: PostCreateTerminalEvent) -> str | None:
-        """Look up the pane's working directory for the terminal via backend."""
+        """Look up the tmux pane's working directory for the terminal."""
 
         metadata = get_terminal_metadata(event.terminal_id)
         if metadata is None:

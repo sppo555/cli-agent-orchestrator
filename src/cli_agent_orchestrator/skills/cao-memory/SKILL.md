@@ -31,6 +31,15 @@ Every memory has a **scope** (where it applies) and a **type** (what kind of fac
 **Types:** `project` (default), `user` (who the user is / preferences), `feedback`
 (corrections and how-to-work guidance), `reference` (pointers to docs, tickets, URLs).
 
+Project implementation facts, task status, test results, file paths, ports, architecture
+decisions, slices, milestones, and acceptance results **must** use `project` scope. Temporary
+coordination state must use `session`. Reserve `global` for cross-project user preferences
+and universally applicable CAO operating rules. Never store project-specific content in
+global scope. When uncertain, use `project`; do not widen scope speculatively.
+CAO rejects the invalid `global` + `project` type pairing on both write and read. A
+terminal-bound MCP caller whose `CAO_TERMINAL_ID` cannot be verified is refused; it is
+never treated as an unbound operator.
+
 ## Recall — check memory BEFORE asking the user
 
 At the start of a task, and whenever you're about to ask the user something they may have

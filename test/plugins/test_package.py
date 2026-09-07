@@ -50,6 +50,7 @@ class TestPluginPackageAPI:
             "CaoPlugin",
             "hook",
             "CaoEvent",
+            "PreInitializeTerminalEvent",
             "PostSendMessageEvent",
             "PostCreateSessionEvent",
             "PostKillSessionEvent",

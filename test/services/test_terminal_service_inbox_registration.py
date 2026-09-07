@@ -55,6 +55,9 @@ def create_mocks():
     - get_herdr_inbox_service -> a live mock service
     """
     with contextlib.ExitStack() as stack:
+        # Provider-memory preparation has dedicated lifecycle coverage; keep
+        # these herdr registration tests isolated from instruction-file I/O.
+        stack.enter_context(patch(_TS + "PROTECTED_PROVIDER_MEMORY_PLUGINS", {}))
 
         def p(name):
             return stack.enter_context(patch(_TS + name))

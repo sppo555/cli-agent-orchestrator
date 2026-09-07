@@ -283,7 +283,7 @@ class TestSearchMode:
                 content="Use pytest-xdist for parallel tests",
                 key="parallel-testing",
                 scope="global",
-                memory_type="project",
+                memory_type="reference",
                 tags="pytest,testing",
                 terminal_context=None,
             )

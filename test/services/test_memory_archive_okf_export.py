@@ -84,7 +84,7 @@ class TestConformance:
 
     def test_every_non_reserved_md_has_frontmatter_with_type(self, svc, backend, dest):
         _store(svc, "topic-one", "First topic. More detail here.", memory_type="reference")
-        _store(svc, "topic-two", "Second topic body.", memory_type="project", tags="ci,deploy")
+        _store(svc, "topic-two", "Second topic body.", memory_type="feedback", tags="ci,deploy")
         report = backend.export_bundle("global", None, dest, False, False)
         assert report.exported == 2
 
