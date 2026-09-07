@@ -92,19 +92,17 @@ into a private `GROK_HOME`), and `build_structured_command()`.
 
 ### Validation (integration branch)
 
-- `pytest test/ --ignore=test/e2e`: **8836 passed, 33 skipped, 1 xfailed, 7 failed**
+- `pytest test/ --ignore=test/e2e`: **8839 passed, 33 skipped, 1 xfailed, 4 failed**
 - `npm --prefix web run build`: passed
 - `npm --prefix web test`: **201 passed** (17 files)
 - `black --check` / `isort --check-only` over `src/ test/`: clean
 
-The 7 failures, all understood:
+**No remaining failure is attributable to a customization.** The 4 are:
 
 | Failure | Status |
 | --- | --- |
-| `test_otel_init` × 3 | Pre-existing; needs the optional `[otel]` extra |
-| `test_constants::test_cao_home_dir_is_under_aws_...` | Artifact of running with a temp `CAO_HOME_DIR` |
-| `test_command_catalog_matches_click` × 2 | **Fixed** after this run (three catalog rows added) |
-| `test_session_teardown_atomic::test_teardown_blocked_by_in_flight_create_same_name` | **Fixed** after this run (see below) |
+| `test_otel_init::TestTelemetryEnabledExplicitly` × 3 | Pre-existing upstream failure — reproduced identically on a pristine `origin/main` checkout at `bab1faf`. NOT a missing optional extra: `opentelemetry` is installed and the tests fail on their own assertions (`set_tracer_provider` never called). Earlier cycles recorded the `[otel]`-extra explanation; that was wrong. |
+| `test_constants::test_cao_home_dir_is_under_aws_...` | Artifact of the validation run using a temp `CAO_HOME_DIR`. Passes against the real home (75 passed). |
 
 ### Resolved: teardown race widened by 4.19
 
