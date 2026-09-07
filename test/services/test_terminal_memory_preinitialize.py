@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,12 +12,8 @@ from sqlalchemy import create_engine
 from cli_agent_orchestrator.clients.database import Base
 from cli_agent_orchestrator.models.agent_profile import AgentProfile
 from cli_agent_orchestrator.plugins import PluginRegistry
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    BEGIN_MARKER as CLAUDE_BEGIN,
-)
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    END_MARKER as CLAUDE_END,
-)
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import BEGIN_MARKER as CLAUDE_BEGIN
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import END_MARKER as CLAUDE_END
 from cli_agent_orchestrator.plugins.builtin.codex_memory import BEGIN_MARKER as CODEX_BEGIN
 from cli_agent_orchestrator.plugins.builtin.codex_memory import END_MARKER as CODEX_END
 from cli_agent_orchestrator.plugins.builtin.memory_markers import (
@@ -134,9 +131,15 @@ async def test_stale_provider_file_is_clean_before_first_provider_load(
             "tmux_window": "developer-abcd",
         },
     )
+    # The plugins resolve the pane cwd through the backend abstraction
+    # (upstream #554 -- a direct tmux_client call returned None on herdr and
+    # memory injection silently no-op'd), so patch that seam, not the removed
+    # module-level tmux_client.
     monkeypatch.setattr(
-        f"{plugin_module}.tmux_client.get_pane_working_directory",
-        lambda _session, _window: str(project_dir),
+        f"{plugin_module}.get_backend",
+        lambda: SimpleNamespace(
+            get_pane_working_directory=lambda _session, _window: str(project_dir)
+        ),
     )
 
     backend = MagicMock()

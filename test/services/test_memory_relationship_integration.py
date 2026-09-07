@@ -458,12 +458,15 @@ def test_s6_legacy_related_keys_unconverted_still_expands(bound, db_engine, tmp_
 
     async def _setup():
         await svc.store(
-            content="# root\nalpha unique-token", key="root", memory_type="project", scope="global"
+            content="# root\nalpha unique-token",
+            key="root",
+            memory_type="reference",
+            scope="global",
         )
         await svc.store(
             content="# legacyfriend\nbeta",
             key="legacyfriend",
-            memory_type="project",
+            memory_type="reference",
             scope="global",
         )
 
@@ -996,7 +999,7 @@ def test_expand_related_does_not_query_the_store_per_primary(bound, db_engine, m
         return Memory(
             id=str(uuid.uuid4()),
             key=key,
-            memory_type="project",
+            memory_type="reference",
             scope="global",
             scope_id=None,
             file_path=f"/{key}.md",
@@ -1078,7 +1081,7 @@ def test_forget_purges_relationships_and_slug_reuse_inherits_nothing(
 
     async def _setup():
         for k in ("doomed", "survivor"):
-            await svc.store(content=f"# {k}\nbody", key=k, memory_type="project", scope="global")
+            await svc.store(content=f"# {k}\nbody", key=k, memory_type="reference", scope="global")
 
     asyncio.run(_setup())
 
@@ -1100,7 +1103,7 @@ def test_forget_purges_relationships_and_slug_reuse_inherits_nothing(
     # ...and a NEW memory reusing the slug inherits nothing.
     asyncio.run(
         svc.store(
-            content="# doomed\nreused slug", key="doomed", memory_type="project", scope="global"
+            content="# doomed\nreused slug", key="doomed", memory_type="reference", scope="global"
         )
     )
     assert (
@@ -1127,7 +1130,7 @@ def test_forget_purges_relationships_when_the_file_already_vanished(
 
     async def _setup():
         for k in ("ghost", "other"):
-            await svc.store(content=f"# {k}\nbody", key=k, memory_type="project", scope="global")
+            await svc.store(content=f"# {k}\nbody", key=k, memory_type="reference", scope="global")
 
     asyncio.run(_setup())
     rel = _svc()

@@ -173,6 +173,10 @@ async def test_omitted_engine_launches_as_explicitly_pinned_v2():
         patch(f"{_MODULE}.get_herdr_inbox_service", return_value=None),
     ):
         backend.return_value.session_exists.return_value = False
+        # 4.19 prepares provider memory files before the provider starts and
+        # fails closed without a working directory. A bare MagicMock returns a
+        # MagicMock here, which is not a str, so give it a real path.
+        backend.return_value.get_pane_working_directory.return_value = "/tmp"
         backend.return_value.supports_event_inbox.return_value = True
         providers.create_provider.return_value = provider
 
@@ -222,6 +226,10 @@ async def test_explicit_model_override_is_probed_even_when_profile_has_none():
         patch(f"{_MODULE}.get_herdr_inbox_service", return_value=None),
     ):
         backend.return_value.session_exists.return_value = False
+        # 4.19 prepares provider memory files before the provider starts and
+        # fails closed without a working directory. A bare MagicMock returns a
+        # MagicMock here, which is not a str, so give it a real path.
+        backend.return_value.get_pane_working_directory.return_value = "/tmp"
         backend.return_value.supports_event_inbox.return_value = True
         providers.create_provider.return_value = provider
 
@@ -274,6 +282,10 @@ async def test_v2_launches_on_a_wrapper_that_does_not_advertise_legacy_ui():
         patch(f"{_MODULE}.get_herdr_inbox_service", return_value=None),
     ):
         backend.return_value.session_exists.return_value = False
+        # 4.19 prepares provider memory files before the provider starts and
+        # fails closed without a working directory. A bare MagicMock returns a
+        # MagicMock here, which is not a str, so give it a real path.
+        backend.return_value.get_pane_working_directory.return_value = "/tmp"
         backend.return_value.supports_event_inbox.return_value = True
         providers.create_provider.return_value = provider
 
