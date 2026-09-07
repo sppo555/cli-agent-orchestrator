@@ -5,8 +5,10 @@ Consumer: terminal.{id}.status
 
 import asyncio
 import logging
+import threading
 import time
 from itertools import groupby
+from typing import Dict
 
 from cli_agent_orchestrator.backends.base import TerminalNotFoundError
 from cli_agent_orchestrator.clients.database import (
@@ -17,9 +19,9 @@ from cli_agent_orchestrator.clients.database import (
 )
 from cli_agent_orchestrator.constants import (
     EAGER_INBOX_DELIVERY,
+    INBOX_RECONCILE_GRACE_SECONDS,
     INBOX_REDRAW_COOLDOWN_SECONDS,
     INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
-    INBOX_RECONCILE_GRACE_SECONDS,
 )
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
 from cli_agent_orchestrator.models.provider import ProviderType
@@ -33,11 +35,32 @@ from cli_agent_orchestrator.utils.event import terminal_id_from_topic
 
 logger = logging.getLogger(__name__)
 
+
 class InboxService:
     """Delivers one pending message per terminal per IDLE cycle."""
 
     def __init__(self) -> None:
         self._last_redraw_nudge: dict[str, float] = {}
+        # deliver_pending is read(PENDING) → status check → mark DELIVERED → send,
+        # with no atomic claim at the DB layer, so two concurrent calls for the
+        # SAME terminal can both read the same oldest row before either marks it
+        # and deliver one task twice. Concurrent callers are real: the status-event
+        # consumer and the immediate POST path both dispatch to worker threads, and
+        # the OpenCode poller and the reconcile sweep add more. Serialize the whole
+        # read→mark→send sequence per terminal; as a side effect this also keeps
+        # two pastes from ever interleaving in one pane. The lock map is tiny
+        # (one Lock per terminal id ever delivered to in this process) and is not
+        # reaped — terminal ids are bounded by session lifecycle.
+        self._delivery_locks_guard = threading.Lock()
+        self._delivery_locks: Dict[str, threading.Lock] = {}
+
+    def _delivery_lock(self, terminal_id: str) -> threading.Lock:
+        with self._delivery_locks_guard:
+            lock = self._delivery_locks.get(terminal_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._delivery_locks[terminal_id] = lock
+            return lock
 
     async def run(self, registry: PluginRegistry | None = None) -> None:
         queue = bus.subscribe("terminal.*.status")
@@ -75,7 +98,19 @@ class InboxService:
         When a plugin registry is supplied, the originating sender and a
         ``send_message`` orchestration type are threaded to ``terminal_service``
         so ``PostSendMessageEvent`` hooks fire with correct attribution.
+
+        Safe to call from any thread: the whole read→mark→send sequence is
+        serialized per terminal (see __init__ for why that is load-bearing).
         """
+        with self._delivery_lock(terminal_id):
+            self._deliver_pending_locked(terminal_id, num_messages, registry)
+
+    def _deliver_pending_locked(
+        self,
+        terminal_id: str,
+        num_messages: int,
+        registry: PluginRegistry | None,
+    ) -> None:
         limit = num_messages if num_messages > 0 else 100
         messages = get_pending_messages(terminal_id, limit=limit)
         if not messages:
