@@ -1270,6 +1270,15 @@ class TestWebSocketGroupedViewerSession:
         ws.client = MagicMock(host="127.0.0.1")
         ws.accept = AsyncMock()
         ws.close = AsyncMock()
+        # Upstream's CWE-1385 guard reads Origin/Host off the real headers before
+        # accept(). A bare MagicMock returns a MagicMock for every lookup, which
+        # urlparse then compares against an int. Give it a same-origin browser
+        # request so the guard passes on its own terms rather than being patched
+        # out -- this endpoint's origin check is exactly what a viewer test must
+        # not silently bypass.
+        ws.headers = {"origin": "http://127.0.0.1:9889", "host": "127.0.0.1:9889"}
+        ws.scope = {"scheme": "http"}
+        ws.query_params = {}
 
         run_calls: list = []
         captured: Dict[str, object] = {}
