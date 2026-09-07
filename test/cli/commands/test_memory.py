@@ -15,8 +15,8 @@ from cli_agent_orchestrator.cli.commands.memory import (
     lint_cmd,
     list_memories,
     quarantine_global_project_cmd,
-    scrub_provider_files_cmd,
     scope_audit_cmd,
+    scrub_provider_files_cmd,
     show,
 )
 from cli_agent_orchestrator.models.memory import Memory

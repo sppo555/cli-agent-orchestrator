@@ -2,12 +2,8 @@
 
 from pathlib import Path
 
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    BEGIN_MARKER as CLAUDE_BEGIN,
-)
-from cli_agent_orchestrator.plugins.builtin.claude_code_memory import (
-    END_MARKER as CLAUDE_END,
-)
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import BEGIN_MARKER as CLAUDE_BEGIN
+from cli_agent_orchestrator.plugins.builtin.claude_code_memory import END_MARKER as CLAUDE_END
 from cli_agent_orchestrator.plugins.builtin.codex_memory import BEGIN_MARKER as CODEX_BEGIN
 from cli_agent_orchestrator.plugins.builtin.codex_memory import END_MARKER as CODEX_END
 from cli_agent_orchestrator.services.provider_memory_files import scrub_provider_memory_files

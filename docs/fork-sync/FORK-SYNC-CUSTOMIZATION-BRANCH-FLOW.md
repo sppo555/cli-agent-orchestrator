@@ -59,7 +59,7 @@ into a private `GROK_HOME`), and `build_structured_command()`.
 - `custom/4.14-worker-init-status-recovery` at `de1f84e`
 - `custom/4.17.6-antigravity-native-usage` at `85a8317`
 - `custom/4.18-grok-cli-provider` at `e5b810c`
-- `custom/4.19-memory-scope-isolation` at `329c90e`
+- `custom/4.19-memory-scope-isolation` at `e9c8f52`
 
 ### Resolutions that needed judgement
 
@@ -104,23 +104,49 @@ The 7 failures, all understood:
 | `test_otel_init` × 3 | Pre-existing; needs the optional `[otel]` extra |
 | `test_constants::test_cao_home_dir_is_under_aws_...` | Artifact of running with a temp `CAO_HOME_DIR` |
 | `test_command_catalog_matches_click` × 2 | **Fixed** after this run (three catalog rows added) |
-| `test_session_teardown_atomic::test_teardown_blocked_by_in_flight_create_same_name` | **OPEN — see below** |
+| `test_session_teardown_atomic::test_teardown_blocked_by_in_flight_create_same_name` | **Fixed** after this run (see below) |
 
-### Open issue: teardown race widened by 4.19
+### Resolved: teardown race widened by 4.19
 
-`test_teardown_blocked_by_in_flight_create_same_name` passes on a pristine
-`origin/main` and fails on the integration branch. Diagnosis: the
-`session_lifecycle_lock` block in `create_terminal` ends around
-`terminal_service.py:1345`, but the provider and status-monitor registrations
-happen at ~`:1435` — **outside the lock**. 4.19 inserts
-`prepare_provider_memory_file` at `:1413`, between the two, widening that
-pre-existing window enough for the test's referee thread to lose the race. The
-row IS enumerated and removed correctly (those assertions pass); only the
-in-memory `status_buffers` and `providers` entries survive.
+`test_teardown_blocked_by_in_flight_create_same_name` passed on a pristine
+`origin/main` and failed on the first integration build, leaving a torn-down
+terminal's status-monitor buffers and provider registration behind
+(`fifo=False status=True providers=True`).
 
-This is an upstream ordering gap that 4.19 exposes rather than creates. Fixing
-it properly means moving provider registration inside the lifecycle lock, which
-is an upstream design change and was deliberately NOT attempted here.
+`create_terminal` registers its runtime state OUTSIDE the #498 lifecycle lock.
+The locked section covers the tmux create and the registry row and then ends —
+deliberately, so a teardown never queues behind `provider.initialize()` — but
+the FIFO reader, the status-monitor buffers and the provider are all registered
+after it. A teardown that wins the lock in that gap dismantles a terminal whose
+provider is not registered yet, and the create then registers it into a session
+that no longer exists.
+
+4.19 had put its provider-memory preparation squarely in that gap, and it is
+not cheap (a backend cwd probe, a memory query, an inter-process-locked file
+rewrite), so it widened the window enough to lose the race every time.
+
+**Fixed on `custom/4.19-memory-scope-isolation`** by moving the preparation
+INTO the locked section, immediately after the registry row is written. It
+could not move later instead: 4.19 requires malformed markers to abort before
+the provider object is constructed
+(`test_malformed_provider_markers_abort_before_provider_construction` pins
+`create_provider.assert_not_called()`), so placing it after `create_provider`
+breaks that guarantee even though the barrier's `initialize()`-based test would
+have allowed it. Inside the lock it is earlier than both, and an aborted
+preparation is now rolled back by the section's own handler — leaving neither a
+tmux session nor a row, which is stronger than the outer cleanup it used to
+get. The section stays fully synchronous and still never spans
+`provider.initialize()`, which is the constraint `services/session_lock.py`
+actually documents.
+
+> ⚠️ **The underlying race is upstream's and is NOT closed.** The gap between
+> the lock's release and the runtime registrations exists on a pristine
+> `origin/main`; this change only removes 4.19's contribution to it. Closing it
+> properly means holding the lock across those registrations, or making the
+> teardown wait on an in-flight create — an upstream design change. Any future
+> customization that adds work between the lock's release and
+> `provider_manager.create_provider` will re-open the same failure, so keep
+> that region cheap.
 
 ### Other things this cycle needs from an operator
 
