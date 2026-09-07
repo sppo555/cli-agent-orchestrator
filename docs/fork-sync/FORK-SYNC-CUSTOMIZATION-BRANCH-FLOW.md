@@ -2,7 +2,142 @@
 
 Use this flow after GitHub fork sync updates `main`.
 
-## Current Clean Rebuild (2026-07-28)
+## Current Clean Rebuild (2026-09-07)
+
+Fork sync moved `origin/main` from `9a56f01` to `bab1faf` — **96 commits**,
+spanning releases v2.4.0, v2.4.1 and v2.5.0. This was not a routine cycle: the
+overlap check found upstream had independently implemented three of our
+customizations.
+
+### Retired customization branches
+
+- **4.1 codex pyte status** — superseded by upstream `135e7ff` (#579), which
+  adds the same `supports_screen_detection` attribute and the same
+  `get_status_from_screen()` method at the same place. Upstream's is strictly
+  better: its `get_status()` already gives the spinner precedence over
+  COMPLETED (the only logic 4.1 added on top), and it fixed
+  `TUI_PROGRESS_PATTERN` to match `(1m 00s ...)` / `(1h 00m 00s ...)` — 4.1's
+  regex only matched `\d+s`, so it MISSED the spinner on any turn over a
+  minute. Do not merge `custom/4.1-codex-pyte-status` again.
+- **4.3 claude effort** — superseded by upstream `6c890ca` (#283), which maps
+  `claudeConfig: {effort, fallback_model}` to `--effort` / `--fallback-model`
+  at the same insertion point. Keeping both would emit `--effort` TWICE for a
+  profile that set both fields. `AgentProfile.effort` survives, but now serves
+  `grok_cli` only (see below); CAO-Tailscale's claude profiles must migrate
+  `effort: X` to `claudeConfig: {effort: X}`. Do not merge
+  `custom/4.3-claude-effort` again.
+
+### Grok: upstream provider adopted, CLI upgraded
+
+Upstream `705e519` (#596) added its own `providers/grok_cli.py` under the same
+filename, the same `ProviderType.GROK_CLI` value and the same manager branch —
+a hard collision with 4.18. The upstream provider was adopted and **grok was
+upgraded 0.2.114 -> 1.0.13** to match it. Three things were ported forward onto
+it, because upstream has no equivalent: `--effort` (the deployment's grok
+profiles set it), `--session-id` plus the new
+`GrokCliProvider.managed_home_for_terminal()` (native token usage reads the
+session log, and upstream both stopped pinning a session id AND moved the log
+into a private `GROK_HOME`), and `build_structured_command()`.
+
+> ⚠️ **`grok login` must be re-run.** The 0.2.114 -> 1.0.13 upgrade invalidated
+> the stored credentials — `grok` reports "Not signed in" even against the
+> untouched `~/.grok`. `test/e2e/test_skills.py::TestGrokCliSkills` fails until
+> this is done, and grok workers will not start.
+
+> ⚠️ **Grok token-usage fixtures are stale.** They were captured from Grok
+> 0.2.x. The counter shape has NOT been re-verified against 1.0.13; do a live
+> capture before trusting native Grok numbers.
+
+### Branch tips used
+
+- `custom/4.4-agy-workspace-trust` at `63dbd44`
+- `custom/4.6-status-turn-boundary` at `ba75ea9`
+- `custom/4.7-web-terminal-clipboard` at `d9233c4`
+- `custom/4.11-web-terminal-viewer-isolation` at `9ecc53c`
+- `custom/4.12-web-terminal-page-scroll` at `54a4538`
+- `custom/4.13-worker-init-headless-viewer` at `e44920c`
+- `custom/4.14-worker-init-status-recovery` at `de1f84e`
+- `custom/4.17.6-antigravity-native-usage` at `85a8317`
+- `custom/4.18-grok-cli-provider` at `e5b810c`
+- `custom/4.19-memory-scope-isolation` at `329c90e`
+
+### Resolutions that needed judgement
+
+- **4.19 memory plugins ↔ `a2c5afe` (#554)**: upstream replaced
+  `tmux_client.get_pane_working_directory` with `get_backend()...` in all three
+  built-in memory plugins because the direct call returned `None` on herdr and
+  memory injection silently no-op'd. 4.19 had rewritten the same files and kept
+  the direct import — **resolving in our favour would have reverted that fix.**
+  Took upstream's backend call and its `locked_atomic_rewrite` (whose docstring
+  documents a real concurrency bug in the temp-file idiom 4.19 still carried),
+  kept 4.19's pre-initialize barrier, scrub-on-empty and scope filter.
+- **4.19 ↔ remote memory gateway**: `memory_context_for_terminal` takes no
+  scope argument, so it cannot restrict the provider-file channel to
+  project+global. A provider-native file is shared by every terminal in the
+  repo, so an unscoped remote context would leak session and agent-private
+  memory. `_repo_safe_context()` now FAILS CLOSED when a remote backend is
+  configured.
+- **4.6/4.14 ↔ `5963ded` (#712)**: upstream added a capture-pane self-heal with
+  a generation counter and two-read confirm in the same region. Not a union:
+  upstream's armed gate replaced 4.6's body and 4.6's clears were re-applied to
+  the assignment block after it. Upstream's self-heal stays gated on
+  `cached == PROCESSING`; widening it to UNKNOWN (4.14's territory) would fork a
+  capture-pane during every worker's init.
+- **4.17.6 run_step ↔ `8852d26` (#650)**: kept upstream's replay gate verbatim
+  and re-wrapped only the `run_agent_step` call in the structured branch.
+- **4.12 ↔ `4b61356` (#676)**: upstream now turns tmux mouse ON for CAO
+  sessions. 4.12's `mouse off` stays, but scoped to the VIEWER session only —
+  a non-alt-screen pane that enters copy-mode from a wheel event swallows
+  Ctrl+C/Ctrl+V, and 4.12 scrolls over the WebSocket anyway.
+
+### Validation (integration branch)
+
+- `pytest test/ --ignore=test/e2e`: **8836 passed, 33 skipped, 1 xfailed, 7 failed**
+- `npm --prefix web run build`: passed
+- `npm --prefix web test`: **201 passed** (17 files)
+- `black --check` / `isort --check-only` over `src/ test/`: clean
+
+The 7 failures, all understood:
+
+| Failure | Status |
+| --- | --- |
+| `test_otel_init` × 3 | Pre-existing; needs the optional `[otel]` extra |
+| `test_constants::test_cao_home_dir_is_under_aws_...` | Artifact of running with a temp `CAO_HOME_DIR` |
+| `test_command_catalog_matches_click` × 2 | **Fixed** after this run (three catalog rows added) |
+| `test_session_teardown_atomic::test_teardown_blocked_by_in_flight_create_same_name` | **OPEN — see below** |
+
+### Open issue: teardown race widened by 4.19
+
+`test_teardown_blocked_by_in_flight_create_same_name` passes on a pristine
+`origin/main` and fails on the integration branch. Diagnosis: the
+`session_lifecycle_lock` block in `create_terminal` ends around
+`terminal_service.py:1345`, but the provider and status-monitor registrations
+happen at ~`:1435` — **outside the lock**. 4.19 inserts
+`prepare_provider_memory_file` at `:1413`, between the two, widening that
+pre-existing window enough for the test's referee thread to lose the race. The
+row IS enumerated and removed correctly (those assertions pass); only the
+in-memory `status_buffers` and `providers` entries survive.
+
+This is an upstream ordering gap that 4.19 exposes rather than creates. Fixing
+it properly means moving provider registration inside the lifecycle lock, which
+is an upstream design change and was deliberately NOT attempted here.
+
+### Other things this cycle needs from an operator
+
+- **Migrate the DB.** `~/.aws/cli-agent-orchestrator/db/cli-agent-orchestrator.db`
+  predates upstream's `terminals.engine` / `group` / `metadata` /
+  `working_directory` columns. `init_db()` adds them (it runs on `cao-server`
+  start), but until then any test or tool hitting the real DB fails with
+  `no such column: terminals.working_directory`.
+- **Check the Tailscale Web UI.** `f45f322` (#533), `e1f6440` (#608) and
+  `d697702` (#658) added Origin validation and bearer-token auth to the
+  terminal WebSocket, before `accept()`. Accessing the Web UI over a Tailscale
+  hostname may now be rejected by the origin allowlist.
+- **Build the TUI.** The `catalog.rs` / `server.rs` edits above were verified
+  only by the Python parity tests that parse the Rust source; this machine has
+  no Rust toolchain, so `cargo build` / `cargo test` never ran.
+
+## Previous Clean Rebuild (2026-07-28)
 
 - Upstream base advanced from `ccbb816` to `9a56f01` in one commit.
 - `9a56f01` adds the opt-in self-learning loop: outcome capture, retrospection,
@@ -101,8 +236,8 @@ git diff --name-status "$(git merge-base HEAD origin/main)"..origin/main
 
 2. Cross-check the new commits against the customization inventory in `docs/fork-sync/CAO-CUSTOMIZATIONS-PROGRESS.md` and `docs/fork-sync/CAO-Tailscale-CHANGES-SUMMARY.md`. Pay special attention to:
 
-- 4.1 Codex pyte status detection: `src/cli_agent_orchestrator/providers/codex.py`
-- 4.3 Claude effort: `src/cli_agent_orchestrator/models/agent_profile.py`, `src/cli_agent_orchestrator/providers/claude_code.py`
+- ~~4.1 Codex pyte status detection~~ RETIRED 2026-09-07 (upstream #579)
+- ~~4.3 Claude effort~~ RETIRED 2026-09-07 (upstream #283 `claudeConfig`). `AgentProfile.effort` remains, for `grok_cli` only
 - 4.4 Agy workspace trust: `src/cli_agent_orchestrator/providers/antigravity_cli.py`
 - 4.6 Status turn-boundary guard: `src/cli_agent_orchestrator/services/status_monitor.py`
 - 4.7 Web terminal clipboard shortcuts: `web/src/components/TerminalView.tsx`
@@ -191,8 +326,8 @@ git config push.default current   # extra safety: never push to a differently-na
 Merge package customization branches:
 
 ```bash
-git merge --no-ff custom/4.1-codex-pyte-status
-git merge --no-ff custom/4.3-claude-effort
+# 4.1 and 4.3 are RETIRED as of 2026-09-07 -- upstream implements both.
+# Merging them back would duplicate get_status_from_screen and emit --effort twice.
 git merge --no-ff custom/4.4-agy-workspace-trust
 git merge --no-ff custom/4.6-status-turn-boundary
 git merge --no-ff custom/4.7-web-terminal-clipboard
