@@ -1411,6 +1411,38 @@ def _build_pty_env() -> Dict[str, str]:
     return env
 
 
+def _scroll_tmux_viewer(viewer_session: str, window_name: str, direction: str) -> None:
+    """Scroll an isolated tmux viewer without sending PageUp/PageDown to the pane."""
+    target = f"{viewer_session}:{window_name}"
+    try:
+        if direction == "up":
+            subprocess.run(
+                ["tmux", "copy-mode", "-u", "-t", target],
+                check=False,
+                capture_output=True,
+            )
+        elif direction == "down":
+            subprocess.run(
+                ["tmux", "send-keys", "-t", target, "-X", "page-down"],
+                check=False,
+                capture_output=True,
+            )
+    except OSError:
+        pass
+
+
+def _cancel_tmux_viewer_copy_mode(viewer_session: str, window_name: str) -> None:
+    """Leave tmux copy-mode before forwarding normal input to the pane."""
+    try:
+        subprocess.run(
+            ["tmux", "send-keys", "-t", f"{viewer_session}:{window_name}", "-X", "cancel"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        pass
+
+
 app = FastAPI(
     title="CLI Agent Orchestrator",
     description="Simplified CLI Agent Orchestrator API",
@@ -6830,6 +6862,11 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
             # supervisor window while the requested worker remains manual and
             # tmux fills the larger browser viewport with dots.
             subprocess.run(
+                ["tmux", "set-option", "-t", viewer_session, "mouse", "off"],
+                check=False,
+                capture_output=True,
+            )
+            subprocess.run(
                 ["tmux", "select-window", "-t", viewer_target],
                 check=True,
                 capture_output=True,
@@ -6941,6 +6978,11 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                 msg = await websocket.receive_text()
                 payload = json.loads(msg)
                 if payload.get("type") == "input":
+                    await asyncio.to_thread(
+                        _cancel_tmux_viewer_copy_mode,
+                        viewer_session,
+                        window_name,
+                    )
                     raw = payload["data"].encode()
                     # Write in chunks to avoid overflowing the PTY buffer
                     chunk_size = 1024
@@ -6960,6 +7002,13 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                         os.kill(proc.pid, signal.SIGWINCH)
                     except OSError:
                         pass
+                elif payload.get("type") == "scroll":
+                    await asyncio.to_thread(
+                        _scroll_tmux_viewer,
+                        viewer_session,
+                        window_name,
+                        payload.get("direction", ""),
+                    )
         except WebSocketDisconnect:
             pass
         except (Exception, asyncio.CancelledError):
