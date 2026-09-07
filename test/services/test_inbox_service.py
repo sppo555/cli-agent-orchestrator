@@ -8,9 +8,9 @@ import pytest
 
 from cli_agent_orchestrator.backends.base import TerminalNotFoundError
 from cli_agent_orchestrator.constants import (
+    INBOX_RECONCILE_GRACE_SECONDS,
     INBOX_REDRAW_COOLDOWN_SECONDS,
     INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
-    INBOX_RECONCILE_GRACE_SECONDS,
 )
 from cli_agent_orchestrator.models.inbox import InboxMessage, MessageStatus
 from cli_agent_orchestrator.models.terminal import TerminalStatus
