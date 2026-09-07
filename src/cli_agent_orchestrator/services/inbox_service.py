@@ -6,6 +6,7 @@ Consumer: terminal.{id}.status
 import asyncio
 import logging
 import threading
+import time
 from itertools import groupby
 from typing import Dict
 
@@ -19,6 +20,8 @@ from cli_agent_orchestrator.clients.database import (
 from cli_agent_orchestrator.constants import (
     EAGER_INBOX_DELIVERY,
     INBOX_RECONCILE_GRACE_SECONDS,
+    INBOX_REDRAW_COOLDOWN_SECONDS,
+    INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
 )
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
 from cli_agent_orchestrator.models.provider import ProviderType
@@ -37,6 +40,7 @@ class InboxService:
     """Delivers one pending message per terminal per IDLE cycle."""
 
     def __init__(self) -> None:
+        self._last_redraw_nudge: dict[str, float] = {}
         # deliver_pending is read(PENDING) → status check → mark DELIVERED → send,
         # with no atomic claim at the DB layer, so two concurrent calls for the
         # SAME terminal can both read the same oldest row before either marks it
@@ -204,6 +208,43 @@ class InboxService:
         for terminal_id in list_pending_receiver_ids_older_than(INBOX_RECONCILE_GRACE_SECONDS):
             try:
                 self.deliver_pending(terminal_id, registry=registry)
+                # A continued, unattended TUI can finish a turn without flushing
+                # its final idle frame through tmux pipe-pane.  CAO then keeps a
+                # stale PROCESSING status and the normal delivery gate above
+                # cannot drain the inbox until a human opens the Web terminal.
+                # Reproduce that harmless attach/resize redraw once, with a
+                # cooldown so genuinely long-running turns are not repeatedly
+                # resized.  The resulting status event drives normal delivery.
+                if status_monitor.get_status(terminal_id) == TerminalStatus.PROCESSING:
+                    now = time.monotonic()
+                    last = self._last_redraw_nudge.get(terminal_id)
+                    elapsed = INBOX_REDRAW_COOLDOWN_SECONDS if last is None else now - last
+                    if elapsed >= INBOX_REDRAW_COOLDOWN_SECONDS:
+                        logger.info(
+                            "Requesting unattended redraw terminal=%s status=processing "
+                            "reason=stale_pending_processing",
+                            terminal_id,
+                        )
+                        ok = terminal_service.nudge_terminal_render(terminal_id)
+                        if ok:
+                            self._last_redraw_nudge[terminal_id] = now
+                        else:
+                            self._last_redraw_nudge[terminal_id] = (
+                                now
+                                - INBOX_REDRAW_COOLDOWN_SECONDS
+                                + INBOX_REDRAW_FAIL_COOLDOWN_SECONDS
+                            )
+                            logger.warning(
+                                "Unattended redraw request failed terminal=%s; retry_after_s=%s",
+                                terminal_id,
+                                INBOX_REDRAW_FAIL_COOLDOWN_SECONDS,
+                            )
+                    else:
+                        logger.debug(
+                            "Skipping unattended redraw cooldown terminal=%s remaining_s=%.1f",
+                            terminal_id,
+                            INBOX_REDRAW_COOLDOWN_SECONDS - elapsed,
+                        )
             except Exception as e:
                 logger.debug(f"Inbox reconciliation failed for {terminal_id}: {e}")
 
