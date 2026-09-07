@@ -9,11 +9,14 @@ import requests
 from cli_agent_orchestrator.mcp_server.server import (
     MEMORY_TERMINAL_CONTEXT_ERROR,
     MemoryTerminalContextError,
-    _current_terminal_id,
-    _get_cleanup_nudge,
     _get_terminal_context_from_env,
     delete_terminal,
 )
+
+# Upstream #634 moved these two helpers out of mcp_server.server into
+# utils.orchestration; only the 4.19 memory-context symbols above still live
+# on the server module.
+from cli_agent_orchestrator.utils.orchestration import _current_terminal_id, _get_cleanup_nudge
 
 
 class TestCurrentTerminalId:
@@ -29,13 +32,13 @@ class TestGetCleanupNudge:
 
     def test_returns_empty_when_terminal_fetch_fails(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 mock_get.return_value.status_code = 500
                 assert _get_cleanup_nudge() == ""
 
     def test_returns_empty_when_no_session_name(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 mock_resp = MagicMock()
                 mock_resp.status_code = 200
                 mock_resp.json.return_value = {}  # no session_name
@@ -44,7 +47,7 @@ class TestGetCleanupNudge:
 
     def test_returns_empty_when_sessions_fetch_fails(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 terminal_resp = MagicMock()
                 terminal_resp.status_code = 200
                 terminal_resp.json.return_value = {"session_name": "cao-test"}
@@ -55,7 +58,7 @@ class TestGetCleanupNudge:
 
     def test_returns_empty_when_below_threshold(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 terminal_resp = MagicMock()
                 terminal_resp.status_code = 200
                 terminal_resp.json.return_value = {"session_name": "cao-test"}
@@ -67,7 +70,7 @@ class TestGetCleanupNudge:
 
     def test_returns_nudge_when_at_threshold(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 terminal_resp = MagicMock()
                 terminal_resp.status_code = 200
                 terminal_resp.json.return_value = {"session_name": "cao-test"}
@@ -82,14 +85,14 @@ class TestGetCleanupNudge:
     def test_returns_empty_on_exception(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "a1b2c3d4"}):
             with patch(
-                "cli_agent_orchestrator.mcp_server.server.requests.get",
+                "cli_agent_orchestrator.utils.orchestration.requests.get",
                 side_effect=Exception("network error"),
             ):
                 assert _get_cleanup_nudge() == ""
 
     def test_skips_lookup_for_malformed_terminal_id(self):
         with patch.dict(os.environ, {"CAO_TERMINAL_ID": "supervisor-abc123"}):
-            with patch("cli_agent_orchestrator.mcp_server.server.requests.get") as mock_get:
+            with patch("cli_agent_orchestrator.utils.orchestration.requests.get") as mock_get:
                 assert _get_cleanup_nudge() == ""
         mock_get.assert_not_called()
 
@@ -105,14 +108,30 @@ class TestMemoryTerminalContext:
 
 class TestDeleteTerminal:
     def test_success(self):
-        with patch("cli_agent_orchestrator.mcp_server.server.requests.delete") as mock_delete:
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
             mock_delete.return_value.raise_for_status.return_value = None
             result = delete_terminal("t1")
         assert result["success"] is True
         assert "t1" in result["message"]
 
+    def test_deferred_cleanup_returns_retryable_failure(self):
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
+            mock_delete.return_value.raise_for_status.return_value = None
+            mock_delete.return_value.json.return_value = {"success": False}
+            result = delete_terminal("t1")
+        assert result["success"] is False
+        assert "retry" in result["message"]
+
+    def test_deferred_cleanup_conflict_status_returns_retryable_failure(self):
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
+            mock_delete.return_value.status_code = 409
+            result = delete_terminal("t1")
+        assert result["success"] is False
+        assert "retry" in result["message"]
+        mock_delete.return_value.raise_for_status.assert_not_called()
+
     def test_not_found_returns_false(self):
-        with patch("cli_agent_orchestrator.mcp_server.server.requests.delete") as mock_delete:
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
             http_err = requests.HTTPError()
             http_err.response = MagicMock()
             http_err.response.status_code = 404
@@ -122,7 +141,7 @@ class TestDeleteTerminal:
         assert "not found" in result["message"]
 
     def test_http_error_non_404(self):
-        with patch("cli_agent_orchestrator.mcp_server.server.requests.delete") as mock_delete:
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
             http_err = requests.HTTPError("500 Server Error")
             http_err.response = MagicMock()
             http_err.response.status_code = 500
@@ -133,9 +152,19 @@ class TestDeleteTerminal:
 
     def test_generic_exception(self):
         with patch(
-            "cli_agent_orchestrator.mcp_server.server.requests.delete",
+            "cli_agent_orchestrator.utils.orchestration.requests.delete",
             side_effect=Exception("connection refused"),
         ):
             result = delete_terminal("t1")
         assert result["success"] is False
         assert "Failed" in result["message"]
+
+    @patch("cli_agent_orchestrator.utils.orchestration.get_local_bearer", return_value="tok")
+    def test_attaches_bearer_when_auth_enabled(self, _bearer):
+        """Review on PR #634: the outgoing DELETE carries the local bearer when configured."""
+        with patch("cli_agent_orchestrator.utils.orchestration.requests.delete") as mock_delete:
+            mock_delete.return_value.raise_for_status.return_value = None
+            delete_terminal("t1")
+
+        _, kwargs = mock_delete.call_args
+        assert kwargs["headers"] == {"Authorization": "Bearer tok"}

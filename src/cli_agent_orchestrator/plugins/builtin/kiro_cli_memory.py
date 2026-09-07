@@ -15,17 +15,18 @@ and abort provider startup so stale steering cannot be loaded.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
+from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.clients.database import get_terminal_metadata
-from cli_agent_orchestrator.clients.tmux import tmux_client
 from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.plugins.base import CaoPlugin
+from cli_agent_orchestrator.services.memory_gateway import remote_memory_url
 from cli_agent_orchestrator.services.memory_service import MemoryService
+from cli_agent_orchestrator.utils.atomic_file import locked_atomic_rewrite
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class KiroCliMemoryPlugin(CaoPlugin):
         """Synchronize the dedicated steering file, deleting it when empty."""
         target = self._validated_target_path(working_directory)
         try:
-            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
+            context_block = self._repo_safe_context(terminal_id)
         except Exception:
             logger.warning("kiro_cli_memory: memory fetch failed; removing managed file")
             context_block = ""
@@ -99,17 +100,33 @@ class KiroCliMemoryPlugin(CaoPlugin):
             target.unlink(missing_ok=True)
             return
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic temp-file + replace: Kiro loads every *.md under
-        # .kiro/steering/, so a partial file from an interrupted write would
-        # still be picked up.
-        temp_path = target.with_suffix(target.suffix + ".tmp")
-        try:
-            temp_path.write_text(context_block + "\n", encoding="utf-8")
-            os.replace(temp_path, target)
-        finally:
-            if temp_path.exists():
-                temp_path.unlink()
+        # Kiro loads every *.md under .kiro/steering/, so a partial file from
+        # an interrupted write would still be picked up. The temp-file idiom
+        # was not enough under concurrency: two terminals preparing the same
+        # repo could have one's finally-unlink delete the other's live temp
+        # file (FileNotFoundError), or publish a half-written one.
+        # locked_atomic_rewrite serializes the whole cycle across processes
+        # and creates the parent directory itself.
+        locked_atomic_rewrite(target, lambda _existing: context_block + "\n")
+
+    @staticmethod
+    def _repo_safe_context(terminal_id: str) -> str:
+        """Project + global memory only — never session or agent-private.
+
+        The remote gateway's ``memory_context_for_terminal`` takes no scope
+        argument, so it cannot honour that restriction. A provider-native file
+        is shared by every terminal working in the repository, so feeding it an
+        unscoped remote context would publish one terminal's session and
+        agent-private memory to all the others — the exact leak this channel's
+        scope filter exists to prevent. Fail closed: refuse, and let ``prepare``
+        scrub the managed block rather than leave a stale one behind.
+        """
+        if remote_memory_url():
+            raise RuntimeError(
+                "remote memory backend cannot scope the provider-file channel to "
+                "project+global; refusing to write repo-shared memory"
+            )
+        return MemoryService().get_provider_file_memory_context(terminal_id)
 
     def _resolve_working_directory(self, event: PostCreateTerminalEvent) -> str | None:
         """Look up the tmux pane's working directory for the terminal."""
@@ -123,7 +140,7 @@ class KiroCliMemoryPlugin(CaoPlugin):
         if not session_name or not window_name:
             return None
 
-        return tmux_client.get_pane_working_directory(session_name, window_name)
+        return get_backend().get_pane_working_directory(session_name, window_name)
 
     def _validated_target_path(self, working_directory: str) -> Path:
         """Return <cwd>/.kiro/steering/cao-memory.md, rejecting escape attempts.

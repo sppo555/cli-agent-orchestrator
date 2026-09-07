@@ -14,18 +14,19 @@ propagate and abort provider startup so stale instructions cannot be loaded.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
+from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.clients.database import get_terminal_metadata
-from cli_agent_orchestrator.clients.tmux import tmux_client
 from cli_agent_orchestrator.plugins import (
     PostCreateTerminalEvent,
     PreInitializeTerminalEvent,
 )
 from cli_agent_orchestrator.plugins.base import CaoPlugin
 from cli_agent_orchestrator.plugins.builtin.memory_markers import strip_managed_blocks
+from cli_agent_orchestrator.services.memory_gateway import remote_memory_url
 from cli_agent_orchestrator.services.memory_service import MemoryService
+from cli_agent_orchestrator.utils.atomic_file import locked_atomic_rewrite
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,30 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
         """Synchronize the managed block, scrubbing stale data on empty/error."""
         target = self._validated_target_path(working_directory)
         try:
-            context_block = MemoryService().get_provider_file_memory_context(terminal_id)
+            context_block = self._repo_safe_context(terminal_id)
         except Exception:
             logger.warning("claude_code_memory: memory fetch failed; scrubbing managed block")
             context_block = ""
         self._write_block(target, context_block)
+
+    @staticmethod
+    def _repo_safe_context(terminal_id: str) -> str:
+        """Project + global memory only — never session or agent-private.
+
+        The remote gateway's ``memory_context_for_terminal`` takes no scope
+        argument, so it cannot honour that restriction. A provider-native file
+        is shared by every terminal working in the repository, so feeding it an
+        unscoped remote context would publish one terminal's session and
+        agent-private memory to all the others — the exact leak this channel's
+        scope filter exists to prevent. Fail closed: refuse, and let ``prepare``
+        scrub the managed block rather than leave a stale one behind.
+        """
+        if remote_memory_url():
+            raise RuntimeError(
+                "remote memory backend cannot scope the provider-file channel to "
+                "project+global; refusing to write repo-shared memory"
+            )
+        return MemoryService().get_provider_file_memory_context(terminal_id)
 
     def _resolve_working_directory(self, event: PostCreateTerminalEvent) -> str | None:
         """Look up the tmux pane's working directory for the terminal."""
@@ -113,7 +133,7 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
         if not session_name or not window_name:
             return None
 
-        return tmux_client.get_pane_working_directory(session_name, window_name)
+        return get_backend().get_pane_working_directory(session_name, window_name)
 
     def _validated_target_path(self, working_directory: str) -> Path:
         """Return <cwd>/.claude/CLAUDE.md, rejecting paths that escape the cwd.
@@ -145,27 +165,27 @@ class ClaudeCodeMemoryPlugin(CaoPlugin):
     def _write_block(self, target: Path, context_block: str) -> None:
         """Write, replace, or remove the delimited memory section."""
 
-        existing = target.read_text(encoding="utf-8") if target.exists() else ""
-        stripped = self._strip_existing_block(existing)
+        # Nothing to publish and nothing on disk: do not create the file just
+        # to hold an empty block (locked_atomic_rewrite creates parents and
+        # writes unconditionally).
+        if not context_block and not target.exists():
+            return
 
-        if not context_block:
-            if not target.exists() or stripped == existing:
-                return
-            new_content = stripped
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
+        def compute_new_content(existing: str) -> str:
+            stripped = self._strip_existing_block(existing)
+            if not context_block:
+                # Scrub: the managed block goes, the user's content stays.
+                return stripped
             separator = "" if not stripped or stripped.endswith("\n") else "\n"
-            new_content = f"{stripped}{separator}{BEGIN_MARKER}\n{context_block}\n{END_MARKER}\n"
+            return f"{stripped}{separator}{BEGIN_MARKER}\n{context_block}\n{END_MARKER}\n"
 
-        # Atomic temp-file + replace: an interrupted write must never leave a
-        # truncated CLAUDE.md behind (same idiom as utils/skill_injection.py).
-        temp_path = target.with_suffix(target.suffix + ".tmp")
-        try:
-            temp_path.write_text(new_content, encoding="utf-8")
-            os.replace(temp_path, target)
-        finally:
-            if temp_path.exists():
-                temp_path.unlink()
+        # Concurrent writers (several terminals in one repo, or the CLI and
+        # cao-server) must not lose each other's block, and the previous
+        # temp-file idiom could not prevent that: it read outside any lock, and
+        # two writers' finally-unlink could delete each other's live temp file.
+        # locked_atomic_rewrite holds an inter-process lock across the whole
+        # read-strip-replace cycle.
+        locked_atomic_rewrite(target, compute_new_content)
 
     @staticmethod
     def _strip_existing_block(content: str) -> str:
