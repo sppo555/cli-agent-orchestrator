@@ -107,9 +107,7 @@ async def run_structured_worker_step(
     except OSError as exc:
         if isinstance(command_builder, ClaudeCodeProvider):
             command_builder.cleanup()
-        raise StructuredWorkerError(
-            f"failed to start structured {provider} worker: {exc}"
-        ) from exc
+        raise StructuredWorkerError(f"failed to start structured {provider} worker: {exc}") from exc
 
     try:
         try:
@@ -120,9 +118,7 @@ async def run_structured_worker_step(
         except asyncio.TimeoutError as exc:
             process.kill()
             await process.communicate()
-            raise TimeoutError(
-                f"structured {provider} worker timed out after {timeout}s"
-            ) from exc
+            raise TimeoutError(f"structured {provider} worker timed out after {timeout}s") from exc
     finally:
         if isinstance(command_builder, ClaudeCodeProvider):
             command_builder.cleanup()
