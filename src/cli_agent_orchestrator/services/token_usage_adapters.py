@@ -211,9 +211,60 @@ def extract_codex_last_message(raw_output: Any) -> str:
     return last_completed if last_completed is not None else "".join(deltas)
 
 
+def extract_grok_cli_usage(raw_output: Any) -> Optional[NativeUsage]:
+    """Extract Grok's final, process-local streaming JSON usage event.
+
+    Grok reports cache-read input separately while ``total_tokens`` includes it.
+    Reasoning tokens are already included in ``output_tokens`` and therefore are
+    not added a second time.  Only a terminal ``end`` event is accepted.
+    """
+
+    found: Optional[NativeUsage] = None
+    for event in _json_objects(raw_output):
+        if event.get("type") != "end":
+            continue
+        candidate = event.get("usage")
+        if not isinstance(candidate, Mapping):
+            continue
+        uncached = candidate.get("input_tokens")
+        cache_read = candidate.get("cache_read_input_tokens", 0)
+        output = candidate.get("output_tokens")
+        if not all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (uncached, cache_read, output)
+        ):
+            continue
+        normalized = {
+            "input_tokens": uncached + cache_read,
+            "output_tokens": output,
+            "total_tokens": candidate.get("total_tokens"),
+        }
+        model_usage = event.get("modelUsage")
+        if isinstance(model_usage, Mapping) and len(model_usage) == 1:
+            model = next(iter(model_usage))
+            if isinstance(model, str) and model:
+                normalized["model"] = model
+        usage = _native_usage(normalized)
+        if usage is not None:
+            found = usage
+    return found
+
+
+def extract_grok_cli_last_message(raw_output: Any) -> str:
+    """Join only Grok streaming JSON ``text`` events into the final response."""
+
+    parts: list[str] = []
+    for event in _json_objects(raw_output):
+        if event.get("type") == "text" and isinstance(event.get("data"), str):
+            parts.append(event["data"])
+    return "".join(parts)
+
+
 def extract_native_usage(provider: str, raw_output: Any) -> Optional[NativeUsage]:
     if provider == ProviderType.CLAUDE_CODE.value:
         return extract_claude_code_usage(raw_output)
     if provider == ProviderType.CODEX.value:
         return extract_codex_usage(raw_output)
+    if provider == ProviderType.GROK_CLI.value:
+        return extract_grok_cli_usage(raw_output)
     return None

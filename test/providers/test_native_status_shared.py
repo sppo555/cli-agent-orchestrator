@@ -58,6 +58,7 @@ PROVIDERS = [
     pytest.param(OmpProvider, "_turns", id="omp"),
     pytest.param(CursorCliProvider, "_turns", id="cursor_cli"),
     pytest.param(AntigravityCliProvider, "_turns", id="antigravity_cli"),
+    pytest.param(GrokCliProvider, "_turns", id="grok_cli"),
     pytest.param(HermesProvider, None, id="hermes"),
     pytest.param(ClaudeCodeProvider, None, id="claude_code"),
     pytest.param(GrokCliProvider, "_turns", id="grok_cli"),

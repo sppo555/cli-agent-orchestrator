@@ -1,0 +1,40 @@
+                                                                                                           Latency and b
+uffering matter too. PTY layers, SSH, and userspace line discipline can batch output so                                 
+                                                                                                          that calibrati
+on probes arrive late or interleaved. Robust designs use deadlines, unique reply tokens                                 
+                                                                                                         where the proto
+col allows, and fallbacks when probes time out. On timeout, the safe behavior is                                        
+                                                                                                        usually conserva
+tive: assume minimal capabilities, avoid exotic modes, and prefer full redraws over                                     
+                                                                                                       clever partial up
+dates. Optimizations can return once live measurements succeed.                                                         
+                                                                                                                        
+                                                                                                █                       
+                                                                                                      Finally, calibrati
+on is continuous, not one-shot. Window sizes change; themes change; users attach                █                       
+                                                                                                      from phones and th
+en from desktops; remote sessions renegotiate. A healthy terminal application                   █                       
+                                                                                                      treats size, mode,
+ and capability as ephemeral facts to be refreshed on events and after anomalies,               █                       
+                                                                                                      not as constants f
+ixed at process                                                                                 █                       
+                                                                                                                        
+                                                                                                █                       
+                                                                                                                        
+                                                                                                     ⠸ Responding… 11s  
+                                                                              14s ⇣12.7k [stop]                         
+                                                                                                                        
+                                                                                                 [Click here to Upgrade]
+ or use Ctrl+O                                                                                                          
+                                                                                                                        
+                ╭───────────────────────────────────────────────────────────────────────────────────────────────────────
+───────────╮                                                                                                            
+              │ ❯                                                                                                       
+         │                                                                                                              
+            ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-ap
+prove ─╯                                                                                                                
+                                                                                                                        
+          Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts                                                         
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

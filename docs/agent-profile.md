@@ -78,11 +78,16 @@ portable and make profile listings useful.
 Provider support for pass-through fields differs. Use the focused guides for
 [Kiro CLI](kiro-cli.md), [Claude Code](claude-code.md),
 [Codex CLI](codex-cli.md), [Antigravity CLI](antigravity-cli.md),
+[Grok CLI](grok-cli.md),
 [Hermes](hermes.md), [Kimi CLI](kimi-cli.md),
 [MiniMax Code](minimax-code.md),
 [GitHub Copilot CLI](copilot-cli.md), [OpenCode CLI](opencode-cli.md),
 [Cursor CLI](cursor-cli.md), and [Grok Build CLI](grok-cli.md) instead of
 relying on a duplicated compatibility catalog here.
+
+Grok V1 is lifecycle-only: `grok_cli` accepts profile model selection and
+runtime skill injection, but profile `mcpServers` entries are not copied into
+Grok configuration and CAO MCP orchestration is not supported.
 
 ## Tool restrictions
 

@@ -2550,6 +2550,11 @@ def get_output(terminal_id: str, mode: OutputMode = OutputMode.FULL) -> str:
     Steps: 200 -> 500 -> 1000 -> 5000.  If no marker is found at 5000 lines,
     the raw tail is returned with a [PARTIAL RESPONSE] prefix so the caller
     knows the output may be incomplete.
+
+    Providers raise ``ValueError`` when exposing the current output
+    would leak a still-active partial response. That error is propagated
+    immediately and never converted into the generic no-response/overflow
+    payloads below.
     """
     # Escalation steps used when the provider does not declare extraction_tail_lines.
     _ESCALATION_STEPS = [200, 500, 1000, 5000]

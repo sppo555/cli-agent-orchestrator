@@ -14,6 +14,7 @@ import pytest
 
 from cli_agent_orchestrator.models.kiro_engine import KiroEngine
 from cli_agent_orchestrator.models.terminal import AgentStepResult, TerminalStatus
+from cli_agent_orchestrator.models.token_usage import TokenUsage
 from cli_agent_orchestrator.providers.kiro_capabilities import KiroPhase0KASError
 from cli_agent_orchestrator.services.agent_step import (
     StepExecutionError,
@@ -91,6 +92,93 @@ class TestHappyPath:
         assert persist.call_args.kwargs["usage"].estimated is True
         m_out.assert_called_once_with("abc12345", OutputMode.LAST)
 
+    def test_grok_assign_handoff_falls_back_to_one_estimate_without_native_evidence(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer(
+            output="grok interactive answer"
+        )
+        with (
+            create,
+            send as m_send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage.estimated is True
+        assert persist.call_args.kwargs["usage"].estimated is True
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
+
+    def test_grok_assign_handoff_persists_one_native_record_when_evidence_exists(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer(
+            output="grok interactive answer"
+        )
+        marker = object()
+        native = TokenUsage(
+            input_tokens=13000,
+            output_tokens=200,
+            total_tokens=13200,
+            estimated=False,
+            model="grok-4.5",
+        )
+        with (
+            create,
+            send as m_send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(
+                f"{_MODULE}.terminal_service.get_terminal",
+                return_value={"session_name": "cao-session", "name": "grok-window"},
+            ),
+            patch(f"{_MODULE}.begin_grok_usage_capture", return_value=marker) as begin,
+            patch(f"{_MODULE}.complete_grok_usage_capture", return_value=native) as complete,
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage is native
+        assert result.token_usage.estimated is False
+        begin.assert_called_once_with("abc12345", "cao-session", "grok-window")
+        complete.assert_called_once_with(marker, agent="developer_grok", progress=None)
+        persist.assert_called_once()
+        assert persist.call_args.kwargs["usage"] is native
+        m_send.assert_called_once_with("abc12345", "do the task", track_token_usage=False)
+
+    def test_grok_native_reader_error_falls_back_to_one_estimate(self):
+        create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
+        with (
+            create,
+            send,
+            delete,
+            get_output,
+            exit_cli,
+            get_wd,
+            wait,
+            status,
+            patch(
+                f"{_MODULE}.terminal_service.get_terminal",
+                return_value={"session_name": "cao-session", "name": "grok-window"},
+            ),
+            patch(f"{_MODULE}.begin_grok_usage_capture", return_value=object()),
+            patch(
+                f"{_MODULE}.complete_grok_usage_capture",
+                side_effect=OSError("provider file disappeared"),
+            ),
+            patch(f"{_MODULE}.persist_worker_token_usage") as persist,
+        ):
+            result = asyncio.run(run_agent_step("grok_cli", "developer_grok", "do the task"))
+
+        assert result.token_usage.estimated is True
+        persist.assert_called_once()
+
     def test_an_empty_frozen_block_is_passed_to_suppress_live_memory(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
         with (
@@ -112,7 +200,7 @@ class TestHappyPath:
                 )
             )
 
-        m_send.assert_called_once_with("abc12345", "x", frozen_memory="")
+        m_send.assert_called_once_with("abc12345", "x", track_token_usage=False, frozen_memory="")
 
     def test_frozen_memory_resolution_is_offloaded_from_the_event_loop(self):
         """A polling frozen-memory resolver must leave the server loop schedulable."""
@@ -168,7 +256,9 @@ class TestHappyPath:
                 release_resolution.set()
                 await step
 
-            m_send.assert_called_once_with("abc12345", "x", frozen_memory=block)
+            m_send.assert_called_once_with(
+                "abc12345", "x", track_token_usage=False, frozen_memory=block
+            )
             return event_loop_thread_id
 
         event_loop_thread_id = asyncio.run(_run())
@@ -273,7 +363,7 @@ class TestHappyPath:
 
         assert result.terminal_id == "reuse99"
         m_create.assert_not_awaited()
-        m_send.assert_called_once_with("reuse99", "x")
+        m_send.assert_called_once_with("reuse99", "x", track_token_usage=False)
 
     def test_reuse_conflicting_kas_uses_phase0_guard_before_send(self):
         create, send, delete, get_output, exit_cli, get_wd, wait, status = _patch_terminal_layer()
@@ -806,7 +896,7 @@ class TestPromptDeliveryVerification:
         m_redeliver.assert_called_once_with("abc12345", "x", 1, full_resend_requires_probe=True)
         # The original send still happened exactly once; only the dropped
         # copy is re-delivered.
-        m_send.assert_called_once_with("abc12345", "x")
+        m_send.assert_called_once_with("abc12345", "x", track_token_usage=False)
 
     def test_redelivery_failure_does_not_break_the_raises_contract(self):
         """The redelivery performs tmux I/O and can raise (blocked input,

@@ -1,0 +1,40 @@
+grok --always-approve --no-subagents
+fixture-user@fixture-host cli-agent-orchestrator % grok --always-approve --no-subagents
+fixture-user@fixture-host cli-agent-orchestrator %
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

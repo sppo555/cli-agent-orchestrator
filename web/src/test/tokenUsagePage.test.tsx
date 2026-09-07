@@ -27,6 +27,7 @@ const summary = (summaryRecords: WorkerTokenUsageRecord[] = records): WorkerToke
   by_provider: [
     ...[...new Set(summaryRecords.map(row => row.provider))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500, native_attempts: 0, estimated_attempts: 1, native_tokens: 0, estimated_tokens: 1500 })),
     { value: 'antigravity_cli', attempts: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, native_attempts: 0, estimated_attempts: 0, native_tokens: 0, estimated_tokens: 0 },
+    { value: 'grok_cli', attempts: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, native_attempts: 0, estimated_attempts: 0, native_tokens: 0, estimated_tokens: 0 },
   ],
   by_agent: [...new Set(summaryRecords.map(row => row.agent))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
   by_model: [...new Set(summaryRecords.map(row => row.model))].map(value => ({ value, attempts: 1, input_tokens: 0, output_tokens: 0, total_tokens: 1500 })),
@@ -69,6 +70,7 @@ describe('TokenUsagePage', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Provider: antigravity_cli')).toBeInTheDocument())
     expect(screen.getByText('Agy')).toBeInTheDocument()
+    expect(screen.getByText('Grok')).toBeInTheDocument()
     expect(screen.getAllByText('0').length).toBeGreaterThan(0)
   })
 

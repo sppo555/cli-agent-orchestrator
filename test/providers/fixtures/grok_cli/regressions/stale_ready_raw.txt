@@ -1,0 +1,7 @@
+DONE
+Turn completed in 2.0s.
+│ ❯                                                                 │
+╰──────────────────────── Grok 4.5 (high) · always-approve ─────────╯
+❯ Start another turn.
+⠸ Responding… 1.0s
+Ctrl+c:cancel

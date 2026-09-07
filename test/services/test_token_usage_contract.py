@@ -26,6 +26,7 @@ def test_inventory_has_one_schema_complete_row_for_each_provider():
     } == {
         ProviderType.CLAUDE_CODE.value,
         ProviderType.CODEX.value,
+        ProviderType.GROK_CLI.value,
     }
     # Archived under docs/ (see the Documentation Ownership Rule in
     # docs/fork-sync/FORK-SYNC-CUSTOMIZATION-BRANCH-FLOW.md); it used to sit

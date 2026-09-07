@@ -79,6 +79,10 @@
     "model": {
       "type": "string"
     },
+    "effort": {
+      "type": "string",
+      "description": "grok_cli per-agent reasoning effort, passed as --effort. Claude Code uses claudeConfig.effort and codex uses codexConfig instead."
+    },
     "permissionMode": {
       "type": "string",
       "enum": ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]

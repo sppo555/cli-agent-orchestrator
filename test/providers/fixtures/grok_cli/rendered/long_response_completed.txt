@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]                12K / 500K
+
+
+     ❯ Write a 700-word response about terminal state calibration. Include the exact marker                  7:51 PM
+       LONG_RESPONSE_MARKER once.
+
+
+     pastes, Unicode combining characters, East Asian wide glyphs, and emoji can each shift column
+     accounting if the tool uses a naïve byte or code-point width model. A calibrated terminal path
+     measures display width the same way the emulator does, or it degrades gracefully when it cannot.
+     Bracketed paste markers help distinguish intentional paste from interactive typing; without them, an
+     agent might treat a 700-word block as a cascade of commands. Detecting paste boundaries, preserving
+     exact bytes, and only then interpreting instructions is part of keeping conversational state aligned
+     with terminal reality.
+
+     LONG_RESPONSE_MARKER
+
+     Latency and buffering matter too. PTY layers, SSH, and userspace line discipline can batch output so
+     that calibration probes arrive late or interleaved. Robust designs use deadlines, unique reply tokens
+     where the protocol allows, and fallbacks when probes time out. On timeout, the safe behavior is
+     usually conservative: assume minimal capabilities, avoid exotic modes, and prefer full redraws over
+     clever partial updates. Optimizations can return once live measurements succeed.
+                                                                                                                       █
+     Finally, calibration is continuous, not one-shot. Window sizes change; themes change; users attach                █
+     from phones and then from desktops; remote sessions renegotiate. A healthy terminal application                   █
+     treats size, mode, and capability as ephemeral facts to be refreshed on events and after anomalies,               █
+     not as constants fixed at process                                                                                 █
+                                                                                                                       █
+
+    ⠸ Responding… 12s                                                                                14s ⇣12.7k [stop]
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-approve ─╯
+
+  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts
+

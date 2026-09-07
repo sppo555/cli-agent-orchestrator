@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]                12K / 500K
+
+
+     ❯ Respond with a Markdown heading ## GROK_MARKDOWN and a fenced python code block containing            7:51 PM
+       print("GROK_CODE").
+
+
+     ◆ Thought for 0.1s
+
+     GROK_MARKDOWN                                                                                           7:51 PM
+
+     print("GROK_CODE")
+
+     Worked for 2.3s.
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-approve ─╯
+
+  Shift+Tab:mode  │  Ctrl+x:shortcuts
+

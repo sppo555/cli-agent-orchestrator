@@ -35,6 +35,7 @@ PROVIDERS_REQUIRING_WORKSPACE_ACCESS = {
     "cursor_cli",
     "grok_cli",
     "hermes",
+    "grok_cli",
     "kimi_cli",
     "kiro_cli",
     "mcode",

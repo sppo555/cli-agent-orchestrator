@@ -143,7 +143,10 @@ def _patch_terminal_layer(
     row before it executes" claim is about.
     """
 
-    def _send(terminal_id: str, prompt: str) -> bool:
+    def _send(terminal_id: str, prompt: str, **kwargs) -> bool:
+        # ``**kwargs`` absorbs run_agent_step's non-positional send_input
+        # arguments (4.17.6's track_token_usage, upstream's frozen_memory);
+        # this stub only cares that the send happened.
         if on_send is not None:
             on_send()
         return True

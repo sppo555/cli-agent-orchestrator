@@ -27,6 +27,7 @@ import signal
 import stat
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -210,9 +211,20 @@ class GrokCliProvider(BaseProvider):
             ) from exc
 
     def _home_path(self) -> Path:
-        digest = hashlib.sha256(self.terminal_id.encode("utf-8")).hexdigest()[:12]
-        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", self.terminal_id).strip("._") or "terminal"
-        return self._managed_home_root() / f"{slug[:48]}-{digest}"
+        return self.managed_home_for_terminal(self.terminal_id)
+
+    @classmethod
+    def managed_home_for_terminal(cls, terminal_id: str) -> Path:
+        """Return a terminal's private GROK_HOME from its id alone.
+
+        Public because the interactive token-usage reader has to find this
+        terminal's Grok session log and has no provider instance to ask. The
+        path is a pure function of the terminal id, so recomputing it here
+        keeps the two callers from drifting apart.
+        """
+        digest = hashlib.sha256(terminal_id.encode("utf-8")).hexdigest()[:12]
+        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", terminal_id).strip("._") or "terminal"
+        return cls._managed_home_root() / f"{slug[:48]}-{digest}"
 
     @staticmethod
     def _managed_home_root() -> Path:
@@ -444,6 +456,32 @@ class GrokCliProvider(BaseProvider):
         if model:
             command_parts.extend(["--model", model])
 
+        # 4.18: give this terminal a deterministic Grok session UUID so the
+        # interactive token tracker can bind the worker to its provider-owned
+        # updates.jsonl. Imported lazily: services.interactive_token_usage
+        # reads this provider's home path, so a module-level import here would
+        # be circular.
+        from cli_agent_orchestrator.services.interactive_token_usage import (
+            grok_usage_session_id,
+        )
+
+        command_parts.extend(
+            [
+                "--session-id",
+                grok_usage_session_id(self.terminal_id, self.session_name, self.window_name),
+            ]
+        )
+
+        # 4.18: per-agent reasoning effort. Upstream's provider does not read
+        # this, but the deployment's grok profiles set it (planner/reviewer at
+        # high, developer at low) and Grok Build exposes it as
+        # ``--reasoning-effort``, with ``--effort`` as the documented alias.
+        # Written as the alias to match the profile field name and the
+        # claude_code/codex spelling.
+        effort = getattr(profile, "effort", None) if profile is not None else None
+        if isinstance(effort, str) and effort.strip():
+            command_parts.extend(["--effort", effort.strip()])
+
         rules = self._apply_skill_prompt(profile.system_prompt if profile is not None else "")
         if rules:
             command_parts.extend(["--rules", rules])
@@ -482,6 +520,33 @@ class GrokCliProvider(BaseProvider):
             command_parts.append("--always-approve")
 
         return shlex.join(command_parts)
+
+    def build_structured_command(self) -> list[str]:
+        """Build Grok's single-turn, process-local streaming JSON command.
+
+        4.18's structured worker path, rebuilt on the upstream provider's
+        command builder. Grok Build exposes single-turn headless mode as
+        ``-p/--single <PROMPT>`` with ``--output-format`` selecting the
+        machine-readable stream.
+        """
+        command = shlex.split(self._build_grok_command())
+        # The interactive builder pins a DETERMINISTIC session id so the token
+        # tracker can find this terminal's log. A structured run is a separate,
+        # process-local conversation, and Grok rejects a --session-id that
+        # already exists under the target session directory -- so it gets a
+        # fresh one.
+        session_index = command.index("--session-id") + 1
+        command[session_index] = str(uuid.uuid4())
+        command.extend(
+            [
+                "--output-format",
+                "streaming-json",
+                # The structured runner appends the prompt to argv. This
+                # value-taking flag must remain last so the prompt binds here.
+                "--single",
+            ]
+        )
+        return command
 
     async def initialize(self) -> bool:
         profile = self._try_load_profile()

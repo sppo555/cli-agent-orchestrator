@@ -1,0 +1,8 @@
+Usage: cao shutdown [OPTIONS]
+
+  Shutdown tmux sessions and cleanup terminal records.
+
+Options:
+  --all           Shutdown all cao sessions
+  --session TEXT  Shutdown specific session
+  --help          Show this message and exit.

@@ -265,6 +265,22 @@ async def token_usage_spool_daemon() -> None:
         await asyncio.sleep(15)
 
 
+async def grok_usage_reconcile_daemon() -> None:
+    """Upgrade estimated Grok rows once their native usage flushes late."""
+
+    logger.info("Grok usage reconciliation daemon started")
+    while True:
+        try:
+            from cli_agent_orchestrator.services.grok_usage_reconciliation import (
+                reconcile_pending_grok_usage,
+            )
+
+            await asyncio.to_thread(reconcile_pending_grok_usage)
+        except Exception:
+            logger.exception("Grok usage reconciliation error")
+        await asyncio.sleep(60)
+
+
 # Response Models
 class TerminalOutputResponse(BaseModel):
     output: str
@@ -1288,6 +1304,7 @@ async def lifespan(app: FastAPI):
     await registry.load()
     app.state.plugin_registry = registry
     token_usage_spool_task = asyncio.create_task(token_usage_spool_daemon())
+    grok_usage_reconcile_task = asyncio.create_task(grok_usage_reconcile_daemon())
 
     # Run cleanup in background
     asyncio.create_task(asyncio.to_thread(cleanup_old_data))
@@ -1390,6 +1407,7 @@ async def lifespan(app: FastAPI):
     # Cancel daemon on shutdown
     daemon_task.cancel()
     token_usage_spool_task.cancel()
+    grok_usage_reconcile_task.cancel()
 
     try:
         await asyncio.gather(
@@ -1398,6 +1416,7 @@ async def lifespan(app: FastAPI):
             inbox_service_task,
             daemon_task,
             token_usage_spool_task,
+            grok_usage_reconcile_task,
             return_exceptions=True,
         )
     except asyncio.CancelledError:
@@ -7192,13 +7211,19 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
             # supervisor window while the requested worker remains manual and
             # tmux fills the larger browser viewport with dots.
             subprocess.run(
-                ["tmux", "set-option", "-t", viewer_session, "mouse", "off"],
-                check=False,
-                capture_output=True,
-            )
-            subprocess.run(
                 ["tmux", "select-window", "-t", viewer_target],
                 check=True,
+                capture_output=True,
+            )
+            # Mouse OFF on the viewer session specifically. Upstream #676 turns
+            # mouse ON for CAO sessions so wheel scrolling works, but a
+            # non-alt-screen pane (codex, agy) that enters copy-mode from a
+            # wheel event swallows Ctrl+C/Ctrl+V; 4.12 drives scrolling over the
+            # WebSocket instead, so this viewer needs none of it. Session-scoped,
+            # so the source session's mouse setting is untouched.
+            subprocess.run(
+                ["tmux", "set-option", "-t", viewer_session, "mouse", "off"],
+                check=False,
                 capture_output=True,
             )
             subprocess.run(

@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]               2.8K / 500K
+
+
+     ❯ Plan how you would create a harmless file named /tmp/grok_phase0_probe.txt, but do not execute any    7:48 PM
+       writes.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    ⠴ Waiting for response… 1.6s                                                                    1.6s ⇣2.83k [stop]
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) ─╯
+
+  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts
+

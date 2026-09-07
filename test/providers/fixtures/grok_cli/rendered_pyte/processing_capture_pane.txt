@@ -1,0 +1,40 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ #1 Reply with exactly CAPTURE_COMPLETED and nothing else.                                                              
+                                                                                                                        
+                                                              ⠧ Starting session… 1.0s                                  
+                                                                                                                        
+                                                                                        [Click here to Upgrade] or use C
+trl+O                                                                                                                   
+                                                                                                                        
+       ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+──╮                                                                                                                     
+     │ ❯                                                                                                                
+│                                                                                                                       
+   ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) · always-approve ─╯ 
+                                                                                                                        
+                                                                                                                        
+ Shift+Tab:mode  │  Ctrl+;:queue  │  Ctrl+x:shortcuts                                                                   
+                                                                                                                        
+                                                                                                                        

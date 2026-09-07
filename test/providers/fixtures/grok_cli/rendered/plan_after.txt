@@ -1,0 +1,40 @@
+
+   feat/grok-cli-phase0-evidence /workspace/cli-agent-orchestrator [Click here to Upgrade]                12K / 500K
+
+
+     ❯ Plan how you would create a harmless file named /tmp/grok_phase0_probe.txt, but do not execute any    7:48 PM
+       writes.
+
+
+
+     3. Verify (read-only after write)
+        After creation (not now):
+        • test -f /tmp/grok_phase0_probe.txt
+        • cat /tmp/grok_phase0_probe.txt or ls -l /tmp/grok_phase0_probe.txt
+
+     4. Cleanup (optional)
+        If the probe is temporary: rm /tmp/grok_phase0_probe.txt when done.
+
+     Safety constraints for this request                                                                               █
+     • No writes — do not run redirects, tee, editors that save, or file-write APIs.                                   █
+     • No “probe then write” — even checking with something that creates the path is out of scope.                     █
+     • Scope — only this path and harmless text content.                                                               █
+                                                                                                                       █
+     Ready-to-run command (for later, not now)                                                                         █
+                                                                                                                       █
+     printf 'grok phase0 probe\ncreated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /tmp/                              █
+     grok_phase0_probe.txt                                                                                             █
+                                                                                                                       █
+     That would create the file with a one-line label and a UTC timestamp. I have not run it.                          █
+                                                                                                                       █
+     Worked for 8.3s.                                                                                                  █
+                                                                                                                       █
+
+  [Click here to Upgrade] or use Ctrl+O
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────── Grok 4.5 (high) ─╯
+
+  Shift+Tab:mode  │  Ctrl+x:shortcuts
+

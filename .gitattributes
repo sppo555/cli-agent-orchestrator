@@ -1,0 +1,2 @@
+# Terminal evidence is byte-exact fixed-width content; trailing cells are data.
+test/providers/fixtures/grok_cli/** -whitespace

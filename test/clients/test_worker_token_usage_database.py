@@ -127,6 +127,17 @@ def test_page_and_summary_use_sql_aggregates(monkeypatch, tmp_path):
         "native_tokens": 0,
         "estimated_tokens": 0,
     }
+    assert providers[ProviderType.GROK_CLI.value] == {
+        "value": ProviderType.GROK_CLI.value,
+        "attempts": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "native_attempts": 0,
+        "estimated_attempts": 0,
+        "native_tokens": 0,
+        "estimated_tokens": 0,
+    }
     assert ProviderType.MOCK_CLI.value not in providers
 
 

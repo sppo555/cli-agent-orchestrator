@@ -1,0 +1,40 @@
+              ⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀                                                                                            
+                                                                                 ⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀                         
+                                                                                                                        
+                            ⠀⠀⢹⣷⠀⠀⠀⠀⠀⢀⣴⡿⠀⠀                                                                              
+                                                                                               ⠀⢀⠞⠁⠠⢶⣶⣶⣶⠿⠋⠀⠀⠀           
+                                                                                                                        
+                                          ⠐⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                                                                
+                                                                                                                        
+                                                                                                                        
+                                                                                              Do you trust the contents 
+of this directory?                                                                                                      
+                                                        /workspace/cli-agent-orchestrator                               
+                                                                                                                        
+                                                                                                                        
+ Grok Build may run or modify contents in this directory,                                                               
+                                                                                                          posing securit
+y risks.                                                                                                                
+                                                                                                                        
+                                                     Yes, proceed                 y                                     
+                                                                                                                        
+        No, quit                     n                                                                                  
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+            Grok Build  0.2.101 Beta                                                                                    
+                                                                                                                        
+                                                                                                                        

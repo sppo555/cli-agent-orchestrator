@@ -1,0 +1,40 @@
+[48;2;20;20;20m
+  [2m[38;2;225;225;225m feat/grok-cli-phase0-evidence[0m[48;2;20;20;20m [38;2;88;88;88m/workspace/cli-agent-orchestrator[39m [38;2;224;175;104m[Click here to Upgrade][39m                [38;2;224;224;224m12K / 500K[39m
+
+  [48;2;36;36;36m                                                                                                                    [48;2;20;20;20m [48;2;17;17;17m
+[48;2;20;20;20m  [48;2;36;36;36m   [1m[38;2;200;200;200m❯ [38;2;225;225;225mWrite a 700-word response about terminal state calibration. Include the exact marker[0m[48;2;36;36;36m                [38;2;108;108;108m  7:51 PM[39m  [48;2;20;20;20m [48;2;17;17;17m
+[48;2;20;20;20m  [48;2;36;36;36m   [1m[38;2;200;200;200m  [38;2;225;225;225mLONG_RESPONSE_MARKER once.[0m[48;2;36;36;36m                                                                                     [48;2;20;20;20m [48;2;17;17;17m
+[48;2;20;20;20m  [48;2;36;36;36m                                                                                                                    [48;2;20;20;20m [48;2;17;17;17m
+[48;2;20;20;20m                                                                                                                       [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mpastes, Unicode combining characters, East Asian wide glyphs, and emoji can each shift column[39m                     [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200maccounting if the tool uses a naïve byte or code-point width model. A calibrated terminal path[39m                    [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mmeasures display width the same way the emulator does, or it degrades gracefully when it cannot.[39m                  [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mBracketed paste markers help distinguish intentional paste from interactive typing; without them, an[39m              [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200magent might treat a 700-word block as a cascade of commands. Detecting paste boundaries, preserving[39m               [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mexact bytes, and only then interpreting instructions is part of keeping conversational state aligned[39m              [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mwith terminal reality.[39m                                                                                            [48;2;17;17;17m
+[48;2;20;20;20m                                                                                                                       [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mLONG_RESPONSE_MARKER[39m                                                                                              [48;2;17;17;17m
+[48;2;20;20;20m                                                                                                                       [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mLatency and buffering matter too. PTY layers, SSH, and userspace line discipline can batch output so[39m              [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mthat calibration probes arrive late or interleaved. Robust designs use deadlines, unique reply tokens[39m             [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mwhere the protocol allows, and fallbacks when probes time out. On timeout, the safe behavior is[39m                   [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200musually conservative: assume minimal capabilities, avoid exotic modes, and prefer full redraws over[39m               [48;2;17;17;17m
+[48;2;20;20;20m     [38;2;200;200;200mclever partial updates. Optimizations can return once live measurements succeed.[39m                                  [48;2;17;17;17m
+[48;2;20;20;20m                                                                                                                       [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m     [38;2;200;200;200mFinally, calibration is continuous, not one-shot. Window sizes change; themes change; users attach[39m                [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m     [38;2;200;200;200mfrom phones and then from desktops; remote sessions renegotiate. A healthy terminal application[39m                   [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m     [38;2;200;200;200mtreats size, mode, and capability as ephemeral facts to be refreshed on events and after anomalies,[39m               [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m     [38;2;200;200;200mnot as constants fixed at process[39m                                                                                 [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m                                                                                                                       [38;2;25;25;25m[48;2;17;17;17m█
+[39m[48;2;20;20;20m
+    [38;2;200;200;200m⠸ Responding…[38;2;108;108;108m 11s[39m                                                                                [38;2;108;108;108m14s ⇣12.7k [stop][39m
+
+  [38;2;224;175;104m[Click here to Upgrade][2m[38;2;108;108;108m or use Ctrl+O[0m[48;2;20;20;20m
+
+  [38;2;80;80;88m╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮[39m
+  [38;2;80;80;88m│[38;2;225;225;225m [38;2;200;200;200m❯ [38;2;225;225;225m                                                                                                               [38;2;80;80;88m│[39m
+  [38;2;80;80;88m╰─────────────────────────────────────────────────────────────────────────────── [38;2;128;128;128mGrok 4.5 (high)[38;2;88;88;88m · [38;2;108;108;108malways-approve[38;2;80;80;88m ─╯[39m
+
+  [1m[38;2;200;200;200mShift+Tab[0m[38;2;108;108;108m[48;2;20;20;20m:mode[2m  │  [0;1m[38;2;200;200;200m[48;2;20;20;20mCtrl+c[0m[38;2;108;108;108m[48;2;20;20;20m:cancel[2m  │  [0;1m[38;2;200;200;200m[48;2;20;20;20mCtrl+x[0m[38;2;108;108;108m[48;2;20;20;20m:shortcuts                                                               [39m
+

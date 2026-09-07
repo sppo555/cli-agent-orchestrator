@@ -1,0 +1,13 @@
+Diagnose MCP server configuration and connectivity
+
+Usage: grok mcp doctor [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  Server name to check
+
+Options:
+      --json                  Emit machine-readable JSON output
+      --debug                 Enable debug logging
+      --debug-file <FILE>     Write debug logs to FILE
+  -h, --help                  Print help
+      --leader-socket <PATH>  Use a custom leader socket path instead of the default `~/.grok/leader.sock`
